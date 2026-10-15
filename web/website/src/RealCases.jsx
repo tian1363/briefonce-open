@@ -1,7 +1,8 @@
 import { ArrowRight, ArrowUpRight, ArrowsOut } from '@phosphor-icons/react';
 import './RealCases.css';
+import { sitePath } from './sitePaths.js';
 
-const caseAssets = 'assets/cases/';
+const caseAssets = sitePath('assets/cases/');
 
 function CaseImage({ file, alt, label, className = '' }) {
   return <figure className={`case-image ${className}`.trim()}>
@@ -25,7 +26,7 @@ export default function RealCases({ lang }) {
     <article className="real-case" data-reveal>
       <header className="real-case-heading">
         <div><span className="case-number">01 / MODEL POSES</span><h3>{zh ? '一件外套，四个姿势。' : 'One jacket. Four poses.'}</h3></div>
-        <a className="text-link" href="examples/apparel-images/">{zh ? '看看怎么做' : 'See the steps'}<ArrowUpRight /></a>
+        <a className="text-link" href={sitePath("examples/apparel-images/")}>{zh ? '看看怎么做' : 'See the steps'}<ArrowUpRight /></a>
       </header>
       <div className="case-pose-layout">
         <div className="case-input"><CaseImage file="jacket-input.png" alt={zh ? '黑色连帽短外套商品参考图' : 'Black hooded jacket product reference'} label={enlarge} /><span>{zh ? '商品参考' : 'Product reference'}</span></div>
@@ -37,7 +38,7 @@ export default function RealCases({ lang }) {
     <article className="real-case" data-reveal>
       <header className="real-case-heading">
         <div><span className="case-number">02 / REFERENCE RECREATION <b>{zh ? '开发预览' : 'Development preview'}</b></span><h3>{zh ? '喜欢这个构图？换上自己的商品。' : 'Keep the layout. Make it yours.'}</h3></div>
-        <a className="text-link" href="examples/reference-recreation/">{zh ? '查看完整案例' : 'View the case'}<ArrowUpRight /></a>
+        <a className="text-link" href={sitePath("examples/reference-recreation/")}>{zh ? '查看完整案例' : 'View the case'}<ArrowUpRight /></a>
       </header>
       <div className="case-comparison">
         <div><CaseImage file="reference-original.jpg" alt={zh ? '原始三栏服装展示参考画面' : 'Original three-column apparel reference'} label={enlarge} /><span>{zh ? '参考画面' : 'Reference'}</span></div>

@@ -7,11 +7,12 @@
     "predev": "node scripts/generate-public-skills.mjs && node scripts/generate-public-examples.mjs",
     "dev": "vite",
     "prebuild": "node scripts/generate-public-skills.mjs && node scripts/generate-public-examples.mjs",
-    "build": "vite build && node scripts/prerender-homepage.mjs && node scripts/prepare-sites-build.mjs",
+    "build": "vite build && node scripts/prerender-homepage.mjs && node scripts/finalize-seo.mjs && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "test:capabilities": "node --test tests/product-capabilities.test.mjs",
-    "test:public-skills": "node --test tests/public-skills.test.mjs"
+    "test:public-skills": "node --test tests/public-skills.test.mjs",
+    "test:seo": "node --test tests/seo.test.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

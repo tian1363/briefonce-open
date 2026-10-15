@@ -1,6 +1,6 @@
 # BriefOnce 官网
 
-BriefOnce 的开源 Beta 官网，位于主仓库的 `web/website`。首页按“产品资料 → 创意对话 → 工具与工作流”介绍工作方式。工具为视频素材提取、创意解读；工作流为模特姿势、挂拍图精修、商品详情长图。详情图由 AI 结合实际参考图策划并出图；姿势按选中数量生成，不对商品图做排列组合。视频新型号尚待真实定价及出片验收，不宣传为已开放。视觉卡片与产品截图为示意，具体功能以当前 Beta 为准。
+BriefOnce 的开源 Beta 官网，位于主仓库的 `web/website`。首页按“产品资料 → 创意对话 → 工具与工作流”介绍工作方式。工具为视频素材提取、创意解读；工作流为模特姿势、挂拍图精修、商品详情长图。详情图由 AI 结合实际参考图策划并出图；姿势按选中数量生成，不对商品图做排列组合。实际案例与创意示意分别标注，参考图复刻案例为开发预览。
 
 ## 本地运行
 
@@ -26,3 +26,13 @@ GitHub Pages 从 `main` 自动发布到 <https://tian1363.github.io/briefonce-op
 页面可供 Google 等搜索引擎发现，但是否收录由搜索引擎决定。发布后可在 Google Search Console 提交站点地图：<https://tian1363.github.io/briefonce-open/sitemap.xml>。
 
 首页顶部和公开 Skill 内容后设有 GitHub Star 入口；Skill 列表与详情页也可返回项目仓库。入口只打开公开仓库，收藏动作由访客在 GitHub 完成，不展示未经核实的 Star 数。
+
+## Google 搜索
+
+中文首页和英文首页 `/en/` 均在构建时生成完整 HTML，并设置独立 canonical、双向 hreflang、分享信息与面包屑。构建产物的 `sitemap.xml` 从实际静态页面生成，包含真实案例图片及来源修改时间。运行 `npm run test:seo` 校验。
+
+Google Search Console 使用网址前缀属性 `https://tian1363.github.io/briefonce-open/`。选择 HTML 标记验证后，将标记的 `content` 值设置为仓库 Actions 变量 `GOOGLE_SITE_VERIFICATION`，再重新运行 Publish website。构建不会生成虚假的验证标签；配置后，验证标记保留在首页源码中。
+
+所有权验证完成后，提交 `https://tian1363.github.io/briefonce-open/sitemap.xml`，并对首页、英文首页与模特图案例申请编入索引。是否完成验证与收录，应以 Search Console 的实际状态为准。GitHub 项目站点的 `/briefonce-open/robots.txt` 不属于域名根目录，不能代替在 Search Console 提交站点地图。
+
+参考：[Google 所有权验证](https://support.google.com/webmasters/answer/9008080)、[多语言页面](https://developers.google.com/search/docs/specialty/international/localized-versions)、[站点地图](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)。

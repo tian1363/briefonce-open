@@ -6,7 +6,7 @@ import "./styles.css";
 const root = document.getElementById("root");
 const app = (
   <React.StrictMode>
-    <App />
+    <App initialLang={document.documentElement.lang === "en" ? "en" : "zh"} />
   </React.StrictMode>
 );
 if (root.hasChildNodes()) hydrateRoot(root, app);

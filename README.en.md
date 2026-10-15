@@ -1,6 +1,6 @@
 # BriefOnce — AI Ecommerce Product Images & Creative Workflows
 
-[中文](README.md) · [Website](https://tian1363.github.io/briefonce-open/) · [Creative Skills](https://tian1363.github.io/briefonce-open/skills/) · [Examples](docs/examples/apparel-images.md)
+[中文](README.md) · [Website](https://tian1363.github.io/briefonce-open/en/) · [Creative Skills](https://tian1363.github.io/briefonce-open/skills/) · [Examples](docs/examples/apparel-images.md)
 
 Keep product photos, facts and creative references together. Create model pose images, refine product photos, and generate product detail images in visual workflows. Develop scripts and video tasks in chat. Built for apparel and footwear brands, ecommerce teams and creators; runs locally or on your own server.
 
