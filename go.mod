@@ -9,7 +9,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.46.0
 	go.opentelemetry.io/otel/trace v1.46.0
 	golang.org/x/image v0.47.0
-	golang.org/x/net v0.60.0
+	golang.org/x/net v0.61.0
 	modernc.org/sqlite v1.59.0
 )
 
