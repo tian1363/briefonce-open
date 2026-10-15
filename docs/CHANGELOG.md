@@ -1,5 +1,11 @@
 # 更新记录
 
+<!-- AUTO-CHANGELOG: entries are inserted below this line. -->
+
+### 2026-10-15 12:12
+
+- `387312c` 官网与中英文 README 新增真实多姿势案例、参考图复刻开发预览与工作流截图。
+
 ## 首次公开发布
 
 - 商品图工作流、素材提取、创意解读与可复用创作 Skill。
