@@ -20,3 +20,7 @@ GitHub 没有可在 README 中设置的搜索引擎 meta 标签。简介、Topic
 README 的 CI 徽章指向 `.github/workflows/ci.yml`；移动文件时同步调整相对链接。官网自动同步能力检查不替代人工维护使用手册。
 
 - Google 搜索：中英文首页独立网址，真实案例页的图像索引、canonical 与面包屑随构建校验；Search Console 验证及站点地图提交方法见[官网说明](../web/website/README.md#google-搜索)。
+
+## 项目公告
+
+已发布[官网与真实商品图案例公告](https://github.com/tian1363/briefonce-open/discussions/9)，提供中文官网、英文官网和真实案例的直接入口。后续更新以实际案例和操作方法为主，不承诺生成效果或搜索排名。
