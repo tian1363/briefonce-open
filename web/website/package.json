@@ -1,0 +1,23 @@
+{
+  "name": "website",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/generate-public-skills.mjs && node scripts/generate-public-examples.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/generate-public-skills.mjs && node scripts/generate-public-examples.mjs",
+    "build": "vite build && node scripts/prerender-homepage.mjs && node scripts/prepare-sites-build.mjs",
+    "preview": "vite preview",
+    "test:sites": "node --test tests/sites-worker.test.mjs",
+    "test:capabilities": "node --test tests/product-capabilities.test.mjs",
+    "test:public-skills": "node --test tests/public-skills.test.mjs"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "@vitejs/plugin-react": "5.0.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "vite": "6.4.4"
+  }
+}

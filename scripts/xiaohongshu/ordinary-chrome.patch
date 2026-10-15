@@ -1,0 +1,98 @@
+--- a/browser/browser.go
++++ b/browser/browser.go
+@@ -1,7 +1,6 @@
+ package browser
+ 
+ import (
+-	"fmt"
+ 	"net/url"
+ 	"strings"
+ 
+@@ -57,35 +56,11 @@
+ 	// 否则 rod 会自行下载一个默认 Chromium：它不是内置浏览器，也不认识下面
+ 	// 这些 flag（未知 flag 被静默忽略，日志照样打印 "fingerprint enabled"），
+ 	// 属于无声降级。宁可不启动，也不启动一个不对的浏览器。
+-	binPath, err := EnsureBrowser()
+-	if err != nil {
+-		panic(fmt.Sprintf("内置浏览器不可用，拒绝启动: %v", err))
+-	}
+-
+ 	opts := []headless_browser.Option{
+ 		headless_browser.WithHeadless(headless),
+-		// 用内置浏览器的默认配置，不强制 UA。
+-		headless_browser.WithFingerprint(""), // 空 = 按运行 OS 自动：Linux→windows，mac→macos
++		headless_browser.WithChromeBinPath("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+ 		headless_browser.WithStealthJS(false),
+-		headless_browser.WithLanguage("zh-CN"), // 面向小红书
+-		// 品牌报 Chrome。
+-		// 注：hardware-concurrency 不设，交给 seed 派生。
+-		headless_browser.WithExtraFlags(map[string]string{"fingerprint-brand": "Chrome"}),
+ 	}
+-	opts = append(opts, headless_browser.WithChromeBinPath(binPath))
+-
+-	// 代理（由调用方经 Option 传入，env 读取放在入口层）。
+-	if cfg.proxy != "" {
+-		opts = append(opts, headless_browser.WithProxy(cfg.proxy))
+-		logrus.Infof("Using proxy: %s", maskProxyCredentials(cfg.proxy))
+-	}
+-
+-	// 固定指纹 seed（由调用方经 Option 传入，env 读取放在入口层）。
+-	if cfg.fingerprintSeed > 0 {
+-		opts = append(opts, headless_browser.WithFingerprintSeed(cfg.fingerprintSeed))
+-		logrus.Infof("fingerprint seed pinned: %d", cfg.fingerprintSeed)
+-	}
+-
+ 	// 加载 cookies
+ 	cookiePath := cookies.GetCookiesFilePath()
+ 	cookieLoader := cookies.NewLoadCookie(cookiePath)
+--- a/main.go
++++ b/main.go
+@@ -5,7 +5,6 @@
+ 	"os"
+ 
+ 	"github.com/sirupsen/logrus"
+-	"github.com/xpzouying/xiaohongshu-mcp/browser"
+ 	"github.com/xpzouying/xiaohongshu-mcp/configs"
+ 	"github.com/xpzouying/xiaohongshu-mcp/cookies"
+ )
+@@ -30,11 +29,6 @@
+ 	logrus.Infof("xiaohongshu-mcp version: %s", version)
+ 
+ 	// 只用内置浏览器。启动时就备好，缺它直接退出，不拖到第一个请求才失败。
+-	binPath, err := browser.EnsureBrowser()
+-	if err != nil {
+-		logrus.Fatalf("%v", err)
+-	}
+-	logrus.Infof("using browser binary: %s", binPath)
+ 
+ 	configs.InitHeadless(headless)
+ 	// 入口层解析出 seed 和代理，经 configs 透传给浏览器工厂。
+--- a/login_session.go
++++ b/login_session.go
+@@ -40,3 +40,11 @@
+ 		l.cancel = nil
+ 	}
+ }
++
++// active reports whether the original QR browser is still waiting. Status
++// polling must not open another login page while that browser is alive.
++func (l *loginSessions) active() bool {
++	l.mu.Lock()
++	defer l.mu.Unlock()
++	return l.cancel != nil
++}
+--- a/service.go
++++ b/service.go
+@@ -103,6 +103,12 @@
+ 
+ // CheckLoginStatus 检查登录状态
+ func (s *XiaohongshuService) CheckLoginStatus(ctx context.Context) (*LoginStatusResponse, error) {
++	// WaitForLogin watches the original QR page and saves cookies before it
++	// finishes. Avoid creating a second QR/login session during that wait.
++	if s.logins.active() {
++		return &LoginStatusResponse{IsLoggedIn: false}, nil
++	}
++
+ 	b := newBrowser()
+ 	defer b.Close()
+ 

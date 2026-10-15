@@ -1,0 +1,16 @@
+.artwork-library { width:min(1120px,94vw); max-width:none; height:88vh; max-height:94vh; padding:0; border:1px solid #e4dcd3; border-radius:22px; background:#fffcf8; color:#24211e; box-shadow:0 24px 90px #201a1833; }
+.artwork-library::backdrop { background:#221c195c; }
+.artwork-library header { display:flex; justify-content:space-between; align-items:center; padding:24px 28px 12px; }
+.artwork-library h2 { margin:0; font-size:24px; }.artwork-library p { color:#766c62; }
+.artwork-library button { display:inline-flex; align-items:center; justify-content:center; gap:6px; background:white; border:1px solid #e2d9d0; border-radius:10px; padding:9px 12px; cursor:pointer; color:inherit; }
+.artwork-library button:disabled { opacity:.5; cursor:wait; }
+.artwork-library-toolbar { display:flex; align-items:end; gap:16px; padding:0 28px 18px; border-bottom:1px solid #e9e0d7; }
+.artwork-library-toolbar label { display:grid; gap:6px; font-size:13px; }.artwork-library select { max-width:60vw; min-width:200px; background:white; padding:9px; border:1px solid #e2d9d0; border-radius:10px; color:inherit; }
+.artwork-library-body { overflow:auto; height:calc(100% - 185px); padding:22px 28px; }
+.artwork-library-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:20px; }
+.artwork-library-grid article { display:flex; flex-direction:column; gap:7px; min-width:0; }
+.artwork-library-grid .downloadable-image { background:#f4eee7; border-radius:12px; overflow:hidden; }
+.artwork-library-grid img { display:block; width:100%; height:220px; object-fit:contain; }
+.artwork-library-grid strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+.artwork-library-grid span,.artwork-library-grid small { color:#82766b; font-size:12px; }.artwork-library-more { margin:24px auto; }.artwork-library-empty { padding:70px 10px; text-align:center; }
+@media(max-width:700px) { .artwork-library-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }.artwork-library-grid img { height:180px; }.artwork-library header,.artwork-library-toolbar,.artwork-library-body { padding-left:16px;padding-right:16px; } }

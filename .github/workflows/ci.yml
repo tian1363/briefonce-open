@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.2"
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - name: Check public content
+        run: |
+          python3 -m unittest discover -s scripts -p "test_public_content.py"
+          python3 scripts/check-public-content.py
+      - name: Test backend
+        run: go test ./...
+      - name: Check Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: Install frontend dependencies
+        run: npm --prefix web/app ci
+      - name: Audit frontend dependencies
+        run: npm --prefix web/app audit --audit-level=moderate
+      - name: Test frontend helpers
+        run: node --test web/app/src/*.test.js
+      - name: Build frontend
+        run: npm --prefix web/app run build

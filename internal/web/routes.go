@@ -1,0 +1,206 @@
+package web
+
+import (
+	"net/http"
+	"os"
+	"path/filepath"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+type Config struct {
+	Port             string
+	DataDir          string
+	UploadDir        string
+	StaticDir        string
+	SecureCookies    bool
+	AllowManagedMode bool
+	ModelMode        string
+	RegistrationMode string
+	InviteCodes      []string
+	AdminUserID      string
+}
+
+func (h *Handler) Routes() http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Use(securityHeaders)
+	r.Use(sameOriginWrites)
+
+	r.Route("/api", func(api chi.Router) {
+		api.Get("/health", h.health)
+		api.Get("/auth/status", h.authStatus)
+		api.Post("/auth/register", h.register)
+		api.Post("/auth/login", h.login)
+		api.Post("/auth/logout", h.logout)
+		api.With(h.requireAuth).Get("/auth/me", h.me)
+		api.Group(func(private chi.Router) {
+			private.Use(h.requireAuth)
+			private.Use(h.analyticsMiddleware)
+			private.Post("/analytics/events", h.analyticsCollect)
+			private.With(h.requireAdmin).Get("/owner/analytics", h.analyticsSummary)
+			h.mountAdminUserView(private)
+			private.Get("/owner/session", h.ownerSession)
+			private.With(h.requireAdmin).Get("/owner/overview", h.ownerOverview)
+			private.With(h.requireAdmin).Get("/owner/invites", h.listInvites)
+			private.With(h.requireAdmin).Post("/owner/invites", h.createInvite)
+			private.With(h.requireAdmin).Post("/owner/invites/{id}/revoke", h.revokeInvite)
+			private.With(h.requireAdmin).Get("/owner/accounts", h.listManagedAccounts)
+			private.With(h.requireAdmin).Get("/owner/provider", h.getPlatformProvider)
+			private.With(h.requireAdmin).Put("/owner/provider", h.savePlatformProvider)
+			private.With(h.requireAdmin).Put("/owner/provider/profiles/{capability}", h.savePlatformModelProfile)
+			private.With(h.requireAdmin).Post("/owner/accounts", h.createManagedAccount)
+			private.With(h.requireAdmin).Patch("/owner/accounts/{id}", h.updateManagedAccount)
+			private.With(h.requireAdmin).Post("/owner/accounts/{id}/credits", h.adjustManagedCredits)
+			private.With(h.requireAdmin).Post("/owner/accounts/{id}/reset-password", h.resetManagedPassword)
+			private.With(h.requireAdmin).Get("/owner/accounts/{id}/ledger", h.adminCreditLedger)
+			private.With(h.requireAdmin).Get("/owner/accounts/{id}/activity", h.adminUsageActivity)
+			private.With(h.requireAdmin).Put("/owner/prices/{capability}", h.updateCreditPrice)
+			private.With(h.requireAdmin).Get("/owner/operations", h.opsOverview)
+			private.With(h.requireAdmin).Put("/owner/operations/prices", h.opsPrice)
+			private.With(h.requireAdmin).Put("/owner/operations/video-prices", h.opsVideoPrice)
+			private.With(h.requireAdmin).Put("/owner/operations/packages", h.opsPackage)
+			private.With(h.requireAdmin).Post("/owner/operations/orders", h.opsCreateOrder)
+			private.With(h.requireAdmin).Post("/owner/operations/orders/{id}/confirm", h.opsConfirm)
+			private.With(h.requireAdmin).Post("/owner/operations/orders/{id}/refund", h.opsRefund)
+			private.With(h.requireAdmin).Post("/owner/operations/calls/{id}/reconcile", h.opsReconcile)
+			private.With(h.requireAdmin).Post("/owner/operations/calls/{id}/recover", h.opsRecover)
+			private.With(h.requireAdmin).Post("/owner/operations/calls/{id}/resolve", h.opsResolve)
+			private.With(h.requireAdmin).Get("/owner/operations/calls/{id}/requests", h.opsRequests)
+			private.With(h.requireAdmin).Get("/owner/operations/export", h.opsExport)
+			private.With(h.requireAdmin).Post("/owner/operations/statements", h.opsImport)
+			private.With(h.requireAdmin).Post("/owner/operations/statements/{id}/match", h.opsMatch)
+			private.With(h.requireAdmin).Post("/owner/operations/deposits", h.opsDeposit)
+			private.Get("/image-models", h.imageCatalog)
+			private.Get("/video-models", h.videoModels)
+			private.Post("/image-models/quote", h.imageQuote)
+			private.Get("/image-provider-jobs", h.myProviderImages)
+			private.Get("/image-provider-jobs/{id}/image", h.myProviderImage)
+			private.Get("/credits/packages", h.myPackages)
+			private.Get("/credits/orders", h.myOrders)
+			private.Post("/credits/orders", h.createMyOrder)
+			private.Get("/artworks", h.listArtworks)
+			private.Get("/credits", h.myCredits)
+			private.Get("/credits/ledger", h.myCreditLedger)
+			private.Get("/credits/activity", h.myUsageActivity)
+			private.Get("/credits/image", h.myImageUsage)
+			private.Get("/skills", h.listSkills)
+			private.Post("/skills/draft", h.generateSkillDraft)
+			private.Post("/toolbox/draft", h.generateToolboxDraft)
+			private.Get("/characters", h.listCharacters)
+			private.Post("/characters", h.uploadCharacter)
+			private.Post("/characters/generate", h.generateCharacter)
+			private.Get("/pose-presets", h.listPosePresets)
+			private.Post("/pose-generations", h.generatePoseImage)
+			private.Get("/characters/{id}/image", h.getCharacterImage)
+			private.Post("/skills", h.createSkill)
+			private.Put("/skills/{id}", h.updateSkill)
+			private.Get("/products", h.listProducts)
+			private.Post("/products", h.createProduct)
+			private.Post("/products/parse", h.parseProductDocument)
+			private.Put("/products/{id}", h.updateProduct)
+			private.Post("/products/{id}/references", h.appendProductReference)
+			private.Get("/products/{id}/markdown", h.getProductMarkdown)
+			private.Get("/products/{id}/observations", h.listProductObservations)
+			private.Post("/products/{id}/observations/compact", h.compactProductObservations)
+			private.Get("/products/{id}/assets", h.listProductAssets)
+			private.Post("/products/{id}/assets", h.uploadProductAsset)
+			private.Get("/products/{id}/image-transforms", h.listImageTransformJobs)
+			private.Post("/products/{id}/image-transforms", h.startImageTransformBatch)
+			private.Post("/products/{id}/detail-plan", h.generateDetailPlan)
+			private.Post("/products/{id}/detail-plan/preview", h.previewDetailPlan)
+			private.Get("/products/{id}/detail-images", h.listDetailImages)
+			private.Post("/products/{id}/detail-images", h.startDetailImages)
+			private.Get("/assets/{id}/file", h.getProductAssetFile)
+			private.Get("/asset-extractions", h.listAssetExtractions)
+			private.Post("/asset-extractions", h.startAssetExtraction)
+			private.Post("/asset-extractions/batch", h.startAssetExtractionBatch)
+			private.Post("/asset-extractions/batch/upload", h.startUploadedAssetExtractionBatch)
+			private.Post("/asset-extractions/upload", h.startUploadedAssetExtraction)
+			private.Get("/asset-extractions/{id}", h.getAssetExtraction)
+			private.Post("/asset-extractions/{id}/import", h.importAssetExtraction)
+			private.Post("/asset-extractions/{id}/accept-review", h.acceptAssetExtractionReview)
+			private.Get("/asset-extractions/{id}/frame", h.getAssetExtractionFrame)
+			private.Get("/asset-extractions/{id}/image", h.getAssetExtractionImage)
+			private.Get("/asset-extractions/{id}/variants/{index}/frame", h.getAssetExtractionVariantFrame)
+			private.Get("/asset-extractions/{id}/variants/{index}/image", h.getAssetExtractionVariantImage)
+			private.Get("/asset-extractions/{id}/variants/{index}/clip", h.getAssetExtractionVariantClip)
+			private.Delete("/assets/{id}", h.deleteProductAsset)
+			private.Post("/assets/{id}/detach", h.detachProductAsset)
+			private.Post("/assets/{id}/replace", h.replaceProductAsset)
+			private.Get("/creative/connection", h.xhsConnection)
+			private.Post("/creative/connection", h.xhsConnection)
+			private.Delete("/creative/connection", h.xhsConnection)
+			private.Get("/creative/image", h.creativeNoteImage)
+			private.Post("/creative/read", h.readCreativeNote)
+			private.Post("/creative/interpret", h.interpretCreative)
+			private.Get("/spaces", h.listSpaces)
+			private.Post("/spaces", h.createSpace)
+			private.Put("/spaces/{id}", h.updateSpace)
+			private.Delete("/spaces/{id}", h.deleteSpace)
+			private.Get("/spaces/{id}/videos", h.listSpaceVideos)
+			private.Get("/spaces/{id}/observability", h.getSpaceObservability)
+			private.Get("/intelligence", h.getIntelligenceDashboard)
+			private.Post("/intelligence/demo", h.seedIntelligenceDemo)
+			private.Post("/intelligence/signals/{id}/memory", h.promoteIntelligenceSignal)
+			private.Put("/intelligence/memories/{id}", h.updateCreativeMemory)
+			private.Delete("/intelligence/memories/{id}", h.deleteCreativeMemory)
+			private.Post("/intelligence/competitors", h.createCompetitorMonitor)
+			private.Post("/intelligence/competitors/{id}/scan", h.scanCompetitorMonitor)
+			private.Get("/jobs", h.listJobs)
+			private.Post("/jobs", h.createJob)
+			private.Get("/jobs/{id}", h.getJob)
+			private.Get("/jobs/{id}/result", h.getJob)
+			private.Post("/jobs/{id}/retry", h.retryJob)
+			private.Post("/jobs/{id}/publish", h.publishJob)
+			private.Post("/jobs/{id}/video-prompts", h.generateVideoPrompts)
+			private.Get("/chats", h.listChats)
+			private.Post("/chats", h.createChat)
+			private.Post("/chats/messages", h.sendNewChatMessage)
+			private.Get("/chats/{id}", h.getChat)
+			private.Get("/chats/{id}/attachments/{attachmentID}/file", h.getChatAttachmentFile)
+			private.Get("/chats/{id}/attachments/{attachmentID}/poster", h.getChatAttachmentPoster)
+			private.Put("/chats/{id}/space", h.assignChatSpace)
+			private.Get("/chats/{id}/progress", h.getChatProgress)
+			private.Post("/chats/{id}/messages", h.sendChatMessage)
+			private.Get("/model-calls", h.listModelCalls)
+			private.Get("/videos", h.listVideos)
+			private.Post("/render-batches/transcribe", h.transcribeRenderSource)
+			private.Post("/render-batches/scan-captions", h.scanRenderCaptions)
+			private.Get("/suggestions", h.listProactiveSuggestions)
+			private.Post("/suggestions/{id}/status", h.updateProactiveSuggestionStatus)
+			private.Post("/videos", h.createVideo)
+			private.Get("/videos/{id}", h.getVideo)
+			private.Get("/videos/{id}/file", h.getVideoFile)
+			private.Post("/videos/{id}/retry", h.retryVideo)
+			private.Get("/render-batches", h.listRenderBatches)
+			private.Post("/render-batches", h.createRenderBatch)
+			private.Get("/render-batches/{id}", h.getRenderBatch)
+			private.Get("/render-batches/{id}/variants/{variantID}/file", h.getRenderVariantFile)
+			private.Post("/render-batches/{id}/variants/{variantID}/retry", h.retryRenderVariant)
+			private.Get("/settings/model", h.getModelSettings)
+			private.Put("/settings/model", h.saveModelSettings)
+		})
+	})
+
+	if stat, err := os.Stat(h.cfg.StaticDir); err == nil && stat.IsDir() {
+		r.Handle("/*", spaHandler(h.cfg.StaticDir))
+	}
+	return r
+}
+
+func spaHandler(staticDir string) http.HandlerFunc {
+	fileServer := http.FileServer(http.Dir(staticDir))
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
+		if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+	}
+}

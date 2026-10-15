@@ -1,0 +1,156 @@
+.downloadable-image {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.downloadable-image img {
+  display: block;
+}
+
+.downloadable-image-preview {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+}
+
+.downloadable-stage-image {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.downloadable-long-image {
+  display: grid;
+  grid-template-areas: "image";
+  width: min(100%, 750px);
+  margin: auto;
+}
+
+.downloadable-long-image > img {
+  grid-area: image;
+  width: 100%;
+}
+
+.downloadable-long-image > .downloadable-image-action {
+  grid-area: image;
+  position: sticky;
+  align-self: start;
+  justify-self: end;
+  top: 8px;
+  right: auto;
+  margin: 8px;
+}
+
+.downloadable-image-action {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid rgba(23, 21, 19, .12);
+  border-radius: 8px;
+  background: rgba(255, 253, 249, .96);
+  box-shadow: 0 2px 10px rgba(23, 21, 19, .12);
+  color: var(--cbi-text-primary, #171513);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity 180ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.downloadable-image-action:hover {
+  background: var(--cbi-primary-tint, #fff0ed);
+  color: var(--cbi-primary-dark, #d8422f);
+}
+
+.downloadable-compact .downloadable-image-action {
+  min-width: 36px;
+  padding: 7px;
+}
+
+.downloadable-compact .downloadable-image-action span {
+  display: none;
+}
+
+.downloadable-image-action:focus-visible {
+  outline: 2px solid var(--cbi-primary, #f0523d);
+  outline-offset: 2px;
+}
+
+.downloadable-image-notice {
+  position: absolute;
+  z-index: 2;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--cbi-bg-default, #fffdf9);
+  color: var(--cbi-text-primary, #171513);
+  box-shadow: 0 2px 10px rgba(23, 21, 19, .12);
+  font-size: 12px;
+}
+
+.downloadable-image-notice a {
+  color: var(--cbi-primary-dark, #d8422f);
+}
+
+.downloadable-image-notice button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  min-width: 32px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .downloadable-image-action {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px);
+  }
+
+  .downloadable-image:hover .downloadable-image-action,
+  .downloadable-image-action:focus-visible,
+  .downloadable-image-preview:focus-visible + .downloadable-image-action {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+}
+
+@media (hover: none) {
+  .downloadable-image-action {
+    min-height: 44px;
+  }
+
+  .downloadable-compact .downloadable-image-action {
+    min-width: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .downloadable-image-action {
+    transition: none;
+  }
+}

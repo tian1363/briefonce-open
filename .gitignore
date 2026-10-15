@@ -1,0 +1,53 @@
+# Runtime data
+/data/
+/uploads/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+/tmp/
+/backups/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Go
+/bin/
+*.test
+/scriptagent
+/server
+
+# Frontend
+**/node_modules/
+/web/app/dist/
+/web/app/.vite/
+/web/website/dist/
+
+# Local design review captures
+/web/website/footer-brand-preview.png
+
+# OS/editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Private operational material (keep primary copies outside this repository)
+/private-docs/
+/internal-operations/
+/docs/internal/
+/docs/private/
+*.credentials.md
+
+# Python local caches
+__pycache__/
+*.py[cod]

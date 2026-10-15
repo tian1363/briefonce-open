@@ -1,0 +1,170 @@
+# Token 优化策略
+
+> 最近维护：2026-08-28 · 状态：本文“当前策略总览”均已在 `main` 实施并有对应测试。
+
+创作空间目标、营销阶段和产品视觉素材属于按需上下文：只在空间对话或相关任务中注入；从创作空间进入对话不会自动发送消息，避免无意义模型调用。
+
+本文档记录 BriefOnce 当前已经实施的 token 成本控制策略。修改会话记忆、ReAct 编排或脚本生成 Prompt 时，应同步更新本文档及对应测试。
+
+## 目标与原则
+
+- 减少重复输入和不必要的模型调用。
+- 不以丢失会话信息为代价压缩上下文。
+- 优先采用可预测、可测试的本地策略。
+- 保留现有产品行为和结果结构，避免优化 token 时改变任务语义。
+
+## 当前策略总览
+
+| 策略 | 当前规则 | 主要收益 |
+|---|---|---|
+| 摘要窗口去重 | 长期摘要严格截止在近期消息窗口之前 | 避免摘要与原始消息重复 |
+| 摘要批量更新 | 首次建立摘要后，每累计 8 条待摘要消息再更新 | 减少摘要模型调用 |
+| 当前问题单次注入 | 当前用户消息只作为 ReAct `Goal` 传入 | 消除每轮固定重复 |
+| ReAct 调用控制 | 默认最多 4 步，相同工具和参数复用已有结果 | 防止调用链膨胀和循环 |
+| 裂变 Prompt 瘦身 | 只传复刻脚本、用户要求和本次所需维度规则 | 移除重复的大块上游内容 |
+
+## 产品资料检索长度基线
+
+`chat_agent_steps` 现在记录每次工具返回的 `raw_observation_chars`，以及该结果实际被放进下一轮模型请求时的 `prompt_observation_chars`。两者按 Unicode 字符计数，不是 Token；数值为 0 的旧记录不能用于计算。最后一步执行的工具没有下一轮模型请求时，后者保持 0。重复工具调用不会重复执行 Handler，因此其原始长度为 0。
+
+先收集真实的 `retrieve_product_sections` 样本，再决定是否做分块准入的旁路判断。基线查询：
+
+```sql
+SELECT COUNT(*) AS calls,
+       SUM(CASE WHEN raw_observation_chars > 5000 THEN 1 ELSE 0 END) AS long_results,
+       SUM(CASE WHEN prompt_observation_chars > 0 THEN 1 ELSE 0 END) AS results_sent_to_model,
+       ROUND(AVG(NULLIF(raw_observation_chars, 0)), 1) AS mean_raw_chars,
+       ROUND(AVG(NULLIF(prompt_observation_chars, 0)), 1) AS mean_prompt_chars
+FROM chat_agent_steps
+WHERE tool = 'retrieve_product_sections'
+  AND COALESCE(error, '') = ''
+  AND raw_observation_chars > 0;
+```
+
+这只测量工具结果长度，不等于整次 Prompt 的 Token 用量。结合 `model_calls` 的实际 Token、延迟和脚本质量评估，才能判断新策略是否有收益。现阶段不删减检索结果，也不额外调用判别模型。
+
+## 1. 会话摘要与近期窗口不重叠
+
+会话上下文由两部分组成：
+
+1. 已压缩的长期摘要。
+2. 摘要截止消息之后的原始消息。
+
+长期摘要保留边界与近期窗口统一使用 `recentChatMessageLimit = 12`。摘要最多处理到倒数第 12 条消息之前，当前用户消息则单独作为本轮目标传给 ReAct。
+
+必须维持以下不变量：
+
+- 一条消息不能同时存在于长期摘要和原始消息上下文中。
+- 尚未进入摘要的消息不能因为窗口截断而丢失。
+- 当前用户消息不能同时存在于上下文和 `Goal` 中。
+
+相关实现：
+
+- `internal/chat/service.go`
+  - `recentChatMessageLimit`
+  - `summaryTailMessageCount`
+  - `messagesAfterSummary`
+  - `reactChatContextPrompt`
+
+## 2. 摘要批量触发
+
+当消息数首次超过 `summaryTriggerMessageCount = 16` 时，系统建立首份摘要。之后不再随着摘要截止点每次移动就调用模型，而是等待累计至少 `summaryBatchMessageCount = 8` 条待摘要消息后统一更新。
+
+批量等待期间，这些消息仍以原文进入 ReAct 上下文。因此模型不会丢失信息，只是短期内保留略长的近期上下文。
+
+摘要失败时沿用已有摘要，不阻断正常回复。
+
+调整批量大小时需要权衡：
+
+- 数值越小：上下文更短，但摘要调用更频繁。
+- 数值越大：摘要调用更少，但批量等待期间的上下文更长。
+
+## 3. 当前用户问题只注入一次
+
+ReAct Prompt 已有独立的“用户目标”区域，因此构造 `ContextPrompt` 时必须排除刚写入的当前用户消息。
+
+当前数据流为：
+
+```text
+历史消息（不含当前问题） -> ContextPrompt
+当前用户问题             -> Goal
+```
+
+产品检索工具仍可使用当前问题作为检索 query；这属于工具输入，不是向同一次模型 Prompt 重复注入对话文本。
+
+## 4. ReAct 步数与重复调用控制
+
+ReAct 默认最多执行 4 步。调用方传入小于或等于 0 的步数时使用该默认值。
+
+每次工具调用使用以下内容生成调用键：
+
+```text
+规范化工具名 + 规范化 JSON 参数
+```
+
+同一轮运行中，如果模型再次请求相同工具和相同参数：
+
+- 不再次执行工具 Handler。
+- 复用首次调用的 observation 和 error。
+- 在步骤记录中标明复用了哪一步结果。
+
+JSON 对象字段顺序不同但语义相同时，应被识别为同一次调用。
+
+相关实现：`internal/reactagent/runner.go`。
+
+## 5. 裂变 Prompt 只携带必要上下文
+
+裂变脚本以已经生成并校验过的复刻脚本为母版。裂变阶段不再重复注入：
+
+- 完整产品 Markdown。
+- 完整视频理解 Markdown。
+- 用户已经选定维度时的全部裂变维度说明。
+
+当前裂变 Prompt 只包含：
+
+- 裂变数量。
+- 用户补充要求。
+- 复刻脚本 JSON。
+- 用户选择的裂变方向。
+- 所选裂变方向对应的规则。
+- 输出约束和 JSON 结构。
+
+用户未选择裂变方向时，系统才注入完整的可用维度规则，允许模型自行选择。用户选择多个方向时，规则会去重后按需注入。
+
+相关实现：
+
+- `internal/agent/prompts.go`
+  - `fissionScriptPrompt`
+  - `fissionDimensionRuleCatalog`
+  - `fissionDimensionRules`
+- `internal/agent/qwen.go`
+
+## 验证要求
+
+修改上述策略时，至少应覆盖以下回归场景：
+
+- 摘要截止消息不会再次出现在原始上下文。
+- 等待下一批摘要期间的消息不会被近期窗口截断。
+- 当前用户问题不会出现在 `ContextPrompt`。
+- ReAct 默认步数保持为预期值。
+- JSON 字段顺序不同的重复工具调用具有相同调用键。
+- 裂变 Prompt 不含完整产品和视频分析标题。
+- 已选择裂变维度时，只包含所选维度的规则。
+
+对应测试位于：
+
+- `internal/chat/service_test.go`
+- `internal/reactagent/runner_test.go`
+- `internal/agent/qwen_test.go`
+
+## 后续优化方向
+
+以下内容尚未包含在本轮策略中：
+
+- 为视频分析生成下游专用的紧凑结构化结果。
+- 使用原生 Tool Calling 和结构化输出。
+- 为稳定 Prompt、工具定义和 Skill 内容启用供应商缓存。
+- 按会话、任务和步骤统计 token，并设置预算与超限降级策略。
+- 为摘要、路由、脚本生成选择不同成本和能力的模型。
+
+实施这些改动前，应先建立基线指标，并比较修改前后的输入 token、输出 token、模型调用次数、任务成功率和 JSON 解析失败率。

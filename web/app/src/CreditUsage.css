@@ -1,0 +1,38 @@
+.credit-symbol { color: var(--cbi-primary, #f0523d); font-weight: 700; }
+.credit-usage-panel { padding: 22px; margin: 16px 0; background: var(--cbi-bg-default); border: 1px solid var(--cbi-divider); border-radius: 16px; }
+.credit-usage-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.credit-usage-panel h2 { margin: 0 0 6px; font-size: 20px; }
+.credit-usage-panel p, .credit-usage-panel small { color: var(--cbi-text-secondary); font-size: 12px; }
+.credit-usage-panel button { border: 1px solid var(--cbi-divider); border-radius: 8px; padding: 7px 12px; background: var(--cbi-bg-default); color: var(--cbi-text-primary); cursor: pointer; }
+.credit-usage-panel button:disabled { opacity: .45; cursor: default; }
+.credit-usage-totals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 20px 0; }
+.credit-usage-totals > div { display: grid; gap: 8px; padding: 14px; background: var(--cbi-bg-shell); border-radius: 10px; }
+.credit-usage-totals strong { font-size: 24px; }
+.credit-activity-list > details { border-bottom: 1px solid var(--cbi-divider); padding: 12px 0; }
+.credit-activity-list summary { display: flex; justify-content: space-between; align-items: center; gap: 14px; cursor: pointer; }
+.credit-activity-list summary > span { display: grid; gap: 5px; }
+.credit-activity-list summary b { font-size: 13px; }
+.credit-task-details { padding: 12px; margin-top: 8px; background: var(--cbi-bg-shell); border-radius: 8px; font-size: 12px; text-align: left; overflow-wrap: anywhere; }
+.credit-task-details dl { display: grid; grid-template-columns: 75px minmax(0,1fr); gap: 8px; margin: 0; }
+.credit-task-details dt { color: var(--cbi-text-secondary); }
+.credit-task-details dd { margin: 0; }
+.credit-task-details a { display: inline-block; color: var(--cbi-primary); margin-top: 12px; }
+.credit-pagination { display: flex; gap: 14px; justify-content: flex-end; align-items: center; margin: 16px 0; font-size: 12px; }
+.credit-ledger > summary { cursor: pointer; padding: 8px 0; }
+.credit-ledger > div { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--cbi-divider); font-size: 12px; }
+.credit-ledger > div > span { flex: 1; }
+.credit-ledger small { display: block; }
+.image-credit-details { margin-top: 6px; font-size: 11px; }
+.image-credit-details > summary, .image-credit-badge { color: var(--cbi-text-secondary); font-size: 11px; cursor: pointer; }
+.image-credit-details .credit-task-details dl { grid-template-columns: 55px minmax(0,1fr); font-size: 11px; }
+@media(max-width:600px) { .credit-usage-totals { grid-template-columns: repeat(2,1fr); } .credit-usage-panel { padding: 14px; } }
+
+.credit-activity-list { max-height: 420px; overflow: auto; }
+.credit-usage-panel { min-width: 0; }
+
+.usage-parameters { margin: 16px 0; min-width: 0; }
+.usage-parameters dl { display: grid; grid-template-columns: minmax(80px, 120px) minmax(0, 1fr); gap: 8px 16px; }
+.usage-parameter-row { display: contents; }
+.usage-parameters dt { color: var(--cbi-text-secondary); font-size: 12px; }
+.usage-parameters dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; max-height: 240px; overflow: auto; }
+.usage-parameters > small { color: var(--cbi-text-secondary); line-height: 1.6; }

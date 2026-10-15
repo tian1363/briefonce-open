@@ -1,0 +1,25 @@
+.xhs-connection, .xhs-login { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px; margin-bottom:24px; border:1px solid var(--cbi-divider,#e8e0d6); border-radius:16px; }
+.xhs-connection small { display:block; margin-top:6px; color:var(--cbi-text-secondary,#6b625a); }
+.xhs-actions { display:flex; gap:8px; flex-shrink:0; }
+.xhs-login { justify-content:flex-start; }
+.xhs-login img { width:180px; height:180px; object-fit:contain; }
+.xhs-images { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.xhs-images a { min-width:0; color:inherit; text-decoration:none; }
+.xhs-images img { display:block; width:100%; height:160px; object-fit:contain; background:var(--cbi-bg-shell,#fbf7f0); border-radius:8px; }
+.xhs-images span { display:block; font-size:12px; margin-top:6px; }
+.xhs-body { white-space:pre-wrap; overflow-wrap:anywhere; }
+@media(max-width:640px) { .xhs-connection,.xhs-login { align-items:flex-start; flex-direction:column; } .xhs-images { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+.xhs-image-button { border:0; padding:0; width:100%; background:transparent; color:inherit; text-align:left; cursor:zoom-in; }
+.xhs-image-button:focus-visible { outline:2px solid var(--cbi-primary); outline-offset:4px; border-radius:8px; }
+.xhs-image-error { min-height:160px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; background:var(--cbi-bg-shell); border-radius:8px; padding:12px; text-align:center; }
+.xhs-image-error small { color:var(--cbi-text-secondary); }
+.xhs-import-controls { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px; margin:16px 0; }
+.xhs-import-controls .tb-field { flex:1; min-width:160px; }
+.xhs-import-controls p,.xhs-import-controls small { flex-basis:100%; margin:0; }
+.xhs-import-panel { margin:24px 0; padding:20px; background:var(--cbi-bg-shell); border-radius:12px; }
+.xhs-import-panel .tb-field { margin-top:16px; }
+.xhs-save-options { display:flex; flex-direction:column; gap:12px; margin:16px 0; }
+.xhs-save-options .workflow-toggle { width:fit-content; max-width:100%; min-height:36px; padding:6px 10px; font-size:13px; }
+.xhs-save-options .workflow-toggle-box { width:18px; height:18px; flex:0 0 18px; }
+.xhs-save-options .workflow-toggle:disabled { opacity:.5; cursor:not-allowed; }
+.xhs-actions [aria-pressed=true] { color:var(--cbi-primary); border-color:var(--cbi-primary); }

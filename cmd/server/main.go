@@ -1,0 +1,227 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/tian1363/scriptagent/internal/agent"
+	"github.com/tian1363/scriptagent/internal/assetextract"
+	"github.com/tian1363/scriptagent/internal/chat"
+	"github.com/tian1363/scriptagent/internal/creatibi"
+	"github.com/tian1363/scriptagent/internal/creative"
+	"github.com/tian1363/scriptagent/internal/jobs"
+	"github.com/tian1363/scriptagent/internal/model"
+	"github.com/tian1363/scriptagent/internal/storage"
+	"github.com/tian1363/scriptagent/internal/telemetry"
+	webserver "github.com/tian1363/scriptagent/internal/web"
+)
+
+func main() {
+	cfg := webserver.Config{
+		Port:             env("APP_PORT", "8080"),
+		DataDir:          env("DATA_DIR", "./data"),
+		UploadDir:        env("UPLOAD_DIR", "./uploads"),
+		StaticDir:        env("STATIC_DIR", "./web/app/dist"),
+		SecureCookies:    envBool("SCRIPT_AGENT_SECURE_COOKIES", false),
+		AllowManagedMode: envBool("SCRIPT_AGENT_ALLOW_MANAGED_MODE", false),
+		ModelMode:        env("SCRIPT_AGENT_MODE", "auto"),
+		RegistrationMode: env("SCRIPT_AGENT_REGISTRATION_MODE", "invite"),
+		InviteCodes:      splitCSV(os.Getenv("SCRIPT_AGENT_INVITE_CODES")),
+		AdminUserID:      strings.TrimSpace(os.Getenv("SCRIPT_AGENT_ADMIN_USER_ID")),
+	}
+
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		log.Fatalf("create data dir: %v", err)
+	}
+	// Local owner binding is server-controlled and never included in source control.
+	if cfg.AdminUserID == "" {
+		value, err := os.ReadFile(filepath.Join(cfg.DataDir, "admin-user-id"))
+		if err != nil && !os.IsNotExist(err) {
+			log.Fatalf("read administrator binding: %v", err)
+		}
+		cfg.AdminUserID = strings.TrimSpace(string(value))
+	}
+	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
+		log.Fatalf("create upload dir: %v", err)
+	}
+	shutdownTelemetry, telemetryEnabled, err := telemetry.InitLangfuse(context.Background(), telemetry.Config{
+		PublicKey: os.Getenv("LANGFUSE_PUBLIC_KEY"), SecretKey: os.Getenv("LANGFUSE_SECRET_KEY"),
+		BaseURL: env("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"), Environment: env("LANGFUSE_ENVIRONMENT", "development"),
+		Release: os.Getenv("LANGFUSE_RELEASE"), CaptureContent: envBool("LANGFUSE_CAPTURE_CONTENT", false),
+	})
+	if err != nil {
+		log.Printf("Langfuse tracing disabled: %v", err)
+	} else if telemetryEnabled {
+		log.Printf("Langfuse tracing enabled")
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := shutdownTelemetry(ctx); err != nil {
+				log.Printf("flush Langfuse traces: %v", err)
+			}
+		}()
+	}
+
+	store, err := jobs.OpenStore(filepath.Join(cfg.DataDir, "scriptagent.db"))
+	if err != nil {
+		log.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+	if err := store.SetGlobalDailyCreditLimit(int64(envInt("SCRIPT_AGENT_GLOBAL_DAILY_CREDIT_LIMIT", 10000))); err != nil {
+		log.Fatalf("configure credit budget: %v", err)
+	}
+	if err := store.SetSoleAdministrator(cfg.AdminUserID); err != nil {
+		log.Fatalf("configure sole administrator: %v", err)
+	}
+	if envBool("SCRIPT_AGENT_LOCAL_ADMIN_UNLIMITED_CREDITS", false) {
+		host := env("SCRIPT_AGENT_BIND_HOST", "")
+		ip := net.ParseIP(host)
+		if cfg.AdminUserID == "" || !(host == "localhost" || ip != nil && ip.IsLoopback()) {
+			log.Fatal("unlimited administrator credits require a loopback-only server and an administrator binding")
+		}
+		if err := store.SetLocalUnlimitedAdmin(cfg.AdminUserID); err != nil {
+			log.Fatalf("configure local administrator credits: %v", err)
+		}
+	}
+	if err := store.ConfigureSecretEncryption(os.Getenv("SCRIPT_AGENT_ENCRYPTION_KEY")); err != nil {
+		log.Fatalf("configure API key encryption: %v", err)
+	}
+
+	fileStore := storage.NewLocalStore(cfg.UploadDir)
+	modelClient := buildModelClient(store, cfg.AllowManagedMode)
+	runner := jobs.NewRunner(store, buildAgent(modelClient, store))
+	chatService := chat.NewService(store, modelClient)
+	chatService.SetAssetExtractor(assetextract.New(store, fileStore, cfg.AllowManagedMode))
+	handler := webserver.NewHandler(cfg, store, fileStore, runner, buildPublisher(), chatService, creative.NewService(store, modelClient))
+	runner.ResumeUnfinished()
+	handler.ResumeVideos()
+	handler.ResumeImages()
+	if err := store.ReconcileStaleCharges(30 * time.Minute); err != nil {
+		log.Printf("credit reconciliation: %v", err)
+	}
+	handler.ResumeRenderBatches()
+	if err := store.InterruptCharacterGenerations(); err != nil {
+		log.Printf("character recovery: %v", err)
+	}
+	if err := store.InterruptDetailImageJobs(); err != nil {
+		log.Printf("detail image recovery: %v", err)
+	}
+	if err := store.InterruptImageTransformJobs(); err != nil {
+		log.Printf("image transform recovery: %v", err)
+	}
+	if err := store.InterruptAssetExtractions(); err != nil {
+		log.Printf("asset extraction recovery: %v", err)
+	}
+
+	server := &http.Server{
+		Addr:              net.JoinHostPort(env("SCRIPT_AGENT_BIND_HOST", ""), cfg.Port),
+		Handler:           handler.Routes(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      15 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+	}
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-stop
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("graceful shutdown failed: %v", err)
+		}
+	}()
+	log.Printf("BriefOnce server listening on http://localhost:%s", cfg.Port)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+func splitCSV(value string) []string {
+	var result []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func buildPublisher() webserver.Publisher {
+	return creatibi.NewCLIPublisher(creatibi.Config{
+		Bin:       env("CREATIBI_CLI_BIN", "cbi"),
+		ProjectID: envInt("CREATIBI_PROJECT_ID", 0),
+		Timeout:   time.Duration(envInt("CREATIBI_PUBLISH_TIMEOUT_SECONDS", 120)) * time.Second,
+	})
+}
+
+func buildAgent(client *model.DashScopeClient, store *jobs.Store) jobs.Agent {
+	mode := env("SCRIPT_AGENT_MODE", "auto")
+	if mode == "mock" {
+		log.Printf("BriefOnce model mode: mock")
+		return agent.NewMockScriptAgent()
+	}
+	log.Printf("BriefOnce model mode: qwen")
+	return agent.NewQwenScriptAgent(agent.QwenConfig{
+		Client:          client,
+		Checkpoints:     store,
+		VideoFPS:        envInt("SCRIPT_AGENT_VIDEO_FPS", 2),
+		MaxDataURIBytes: int64(envInt("SCRIPT_AGENT_MAX_DATA_URI_MB", 20)) * 1024 * 1024,
+	})
+}
+
+func buildModelClient(store *jobs.Store, allowManaged bool) *model.DashScopeClient {
+	apiKey := os.Getenv("DASHSCOPE_API_KEY")
+	return model.NewDashScopeClient(model.DashScopeConfig{
+		APIKey:              apiKey,
+		Endpoint:            env("DASHSCOPE_ENDPOINT", model.DefaultDashScopeEndpoint),
+		Model:               env("SCRIPT_AGENT_MODEL", "qwen3.6-plus"),
+		EmbeddingEndpoint:   env("DASHSCOPE_EMBEDDING_ENDPOINT", model.DefaultDashScopeEmbeddingEndpoint),
+		EmbeddingModel:      env("SCRIPT_AGENT_EMBEDDING_MODEL", "text-embedding-v4"),
+		EmbeddingDimensions: envInt("SCRIPT_AGENT_EMBEDDING_DIMENSIONS", 1024),
+		Recorder:            store,
+		Provider:            store,
+		AllowManaged:        allowManaged,
+	})
+}
+
+func env(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}

@@ -1,0 +1,6349 @@
+import { setAnalyticsUser, trackPage, installDownloadTracking } from "./analytics.js";
+import AdminUserView from "./AdminUserView.jsx";
+import { getVideoModels } from "./api.js";
+import AdminConsole from "./AdminConsole.jsx";
+import CreditUsagePanel from "./CreditUsage.jsx";
+import { chatTimeline } from "./chatTimeline.js";
+import { visibleAssistantContent } from "./assistantContent.js";
+import { hasVideoScript, parseVideoSkillRequest, prepareVideoDraft, videoDraftContext, videoReferenceIDs } from "./videoSkill.js";
+import InviteManager from "./InviteManager";
+import AccountManager, { ManagedCreditsPanel } from "./AccountManager";
+import EcommerceToolbox from "./EcommerceToolbox";
+import DownloadableImage from "./DownloadableImage.jsx";
+import { ProductChoices } from "./ProductPicker.jsx";
+import {
+  Activity,
+  BriefcaseBusiness,
+  Bot,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  ImagePlus,
+  Layers,
+  History,
+  House,
+  FolderKanban,
+  Search,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleHelp,
+  ChartNoAxesCombined,
+  Loader2,
+  LogOut,
+  Mail,
+  Mic,
+  MicOff,
+  MessageSquare,
+  Package,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Radar,
+  ScanFace,
+  Send,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  KeyRound,
+  Upload,
+  Video,
+  Trash2,
+  X,
+} from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  createJob,
+  createChat,
+  createVideo,
+  createProduct,
+  parseProductDocument,
+  createSpace,
+  assignChatSpace,
+  deleteSpace,
+  updateSpace,
+  createSkill,
+  generateSkillDraft,
+  updateSkill,
+  updateProduct,
+  generateVideoPrompts,
+  getModelSettings,
+  getAuthStatus,
+  getCurrentUser,
+  getSpaceObservability,
+  getIntelligence,
+  seedIntelligenceDemo,
+  promoteIntelligenceSignal,
+  updateCreativeMemory,
+  deleteCreativeMemory,
+  createCompetitorMonitor,
+  scanCompetitorMonitor,
+  getOwnerSession,
+  getOwnerOverview,
+  loginOwner,
+  login,
+  logout,
+  logoutOwner,
+  getChat,
+  getChatProgress,
+  getJob,
+  getProductMarkdown,
+  getMyCredits,
+  listProducts,
+  listProductAssets,
+  listProductObservations,
+  listSpaces,
+  listSpaceVideos,
+  uploadProductAsset,
+  detachProductAsset,
+  replaceProductAsset,
+  listSkills,
+  listChats,
+  listJobs,
+  listModelCalls,
+  listVideos,
+  listSuggestions,
+  updateSuggestionStatus,
+  retryJob,
+  retryVideo,
+  register,
+  saveModelSettings,
+  sendChatMessage,
+  sendNewChatMessage,
+} from "./api.js";
+import agentIcon from "./assets/scriptagent-agent-v2.png";
+
+function lastAssistantMessage(messages) {
+  return [...(Array.isArray(messages) ? messages : [])]
+    .reverse()
+    .find((message) => message.role === "assistant");
+}
+
+function typingStep(length) {
+  if (length > 1800) return 8;
+  if (length > 900) return 5;
+  if (length > 360) return 3;
+  return 2;
+}
+
+const chatQuickTasks = [
+  { title: "生成裂变方向", description: "基于当前产品，先给我 3 个适合短视频的裂变方向，并说明每个方向改哪里。" },
+  { title: "写产品 Markdown", description: "帮我把这个产品整理成可用于生成脚本的 Markdown，需要包含卖点、用户、场景、限制和素材备注。" },
+  { title: "优化脚本", description: "帮我检查这条脚本哪里可以优化，重点看开头钩子、产品卖点和 CTA。" },
+  { title: "拆解并复刻素材", description: "调用 material_replication_analysis skill，分析我上传的图片或视频，拆解设计方式、内容表达和视听结构，并给出视频复刻建议。" },
+  { title: "生成视频提示词", description: "调用 seedance_video_prompt_writer skill，把这条分镜脚本转成 Seedance 可用的视频生成提示词。" },
+];
+
+const resultTabs = [
+  ["run_log", "运行日志"],
+  ["analysis_markdown", "视频分析"],
+  ["replica_script_json", "复刻脚本"],
+  ["fission_scripts_json", "裂变脚本"],
+  ["video_prompts", "视频提示词"],
+];
+
+const marketingGoals = [
+  ["conversion", "商品转化", "推动下单、留资或到店"],
+  ["awareness", "品牌认知", "建立记忆点与品牌心智"],
+  ["seeding", "内容种草", "强化场景、卖点与信任"],
+  ["growth", "用户增长", "促进关注、互动与拉新"],
+  ["campaign", "活动引爆", "集中放大活动声量与参与"],
+];
+
+const marketingStages = [
+  ["reach", "认知", "先让目标人群看见并记住"],
+  ["interest", "兴趣", "让用户理解价值并产生偏好"],
+  ["action", "行动", "用明确利益点推动立即转化"],
+];
+
+function marketingLabel(options, value) {
+  return options.find(([id]) => id === value)?.[1] || "未设置";
+}
+
+function suggestionActionLabel(actionType) {
+  return (
+    {
+      continue_space: "继续创作",
+      open_space: "完善空间",
+      open_product: "添加素材",
+      review_video: "查看视频",
+      review_signal: "查看证据",
+    }[actionType] || "查看"
+  );
+}
+
+const runningStatuses = new Set([
+  "pending",
+  "running",
+  "analyzing_video",
+  "extracting_structure",
+  "generating_replica",
+  "generating_fission",
+  "validating",
+  "publishing",
+]);
+
+const fissionDirectionGroups = [
+  {
+    layer: "视听层",
+    items: [
+      "换BGM",
+      "换音效",
+      "换色调/滤镜",
+      "换字幕&花字",
+      "换画幅",
+      "换配音(语速/声线)",
+    ],
+  },
+  {
+    layer: "结构层",
+    items: [
+      "换开头钩子",
+      "换CTA",
+      "时长压缩/拉伸",
+      "变速·节奏调整",
+      "换首帧/封面",
+      "同素材高光重剪",
+    ],
+  },
+  {
+    layer: "元素层",
+    items: [
+      "换局部角色/群演",
+      "换局部场景贴片",
+      "换局部道具/UI",
+      "字幕语言本地化",
+    ],
+  },
+];
+
+const fissionDirections = fissionDirectionGroups.flatMap((group) =>
+  group.items.map((item) => ({
+    layer: group.layer,
+    label: item,
+    value: `${group.layer}-${item}`,
+  })),
+);
+
+function defaultFissionDirection(index) {
+  return fissionDirections[index % fissionDirections.length]?.value || "";
+}
+
+function insertedSkillSlash(event) {
+  const input = event.nativeEvent;
+  if (input?.inputType !== "insertText" || input.data !== "/" || input.isComposing) return -1;
+  const position = event.currentTarget.selectionStart - 1;
+  const before = event.currentTarget.value.slice(0, position);
+  return /(?:https?:\/\/\S*|https?:|www\.\S*)$/i.test(before) ? -1 : position;
+}
+
+function replaceSkillSlash(value, position, invocation) {
+  if (position < 0 || value[position] !== "/") return invocation;
+  return [value.slice(0, position).trimEnd(), invocation, value.slice(position + 1).trimStart()].filter(Boolean).join(" ");
+}
+
+export function App() {
+ const match=window.location.pathname.match(/^\/admin\/users\/([^/]+)\/view\/?$/);
+ return match ? <AdminUserView userID={decodeURIComponent(match[1])}/> : <MainApp/>;
+}
+
+function MainApp() {
+  const isAdminRoute = window.location.pathname === "/admin" || window.location.pathname === "/admin/";
+  const [videoSkillRequest, setVideoSkillRequest] = useState(null);
+  const [toolboxEntry, setToolboxEntry] = useState(null);
+  const [view, setView] = useState(() => window.location.hash === "#toolbox" ? "toolbox" : "home");
+  useEffect(() => {
+    if (isAdminRoute) return;
+    const syncToolboxRoute = () => { if (window.location.hash === "#toolbox") setView("toolbox"); else if (window.location.hash === "#analytics") setView("home"); };
+    window.addEventListener("hashchange", syncToolboxRoute);
+    return () => window.removeEventListener("hashchange", syncToolboxRoute);
+  }, [isAdminRoute]);
+  useEffect(() => {
+    if (isAdminRoute) return;
+    if (view === "toolbox") window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${view}`);
+    else if (["#toolbox", "#analytics"].includes(window.location.hash)) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  }, [view, isAdminRoute]);
+  const [currentUser, setCurrentUser] = useState(null);
+  useEffect(() => installDownloadTracking(), []);
+  useEffect(() => { setAnalyticsUser(currentUser?.id); if (currentUser?.id) trackPage(view); return () => setAnalyticsUser(""); }, [currentUser?.id]);
+  useEffect(() => { if (currentUser?.id) trackPage(view); }, [view, currentUser?.id]);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [registrationAvailable, setRegistrationAvailable] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [jobs, setJobs] = useState([]);
+  const [videos, setVideos] = useState([]);
+  const [isCreatingVideo, setIsCreatingVideo] = useState(false);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [activeTab, setActiveTab] = useState("run_log");
+  const [videoPromptContent, setVideoPromptContent] = useState("");
+  const [isGeneratingVideoPrompts, setIsGeneratingVideoPrompts] =
+    useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [spaces, setSpaces] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+  const [isCreatingSpace, setIsCreatingSpace] = useState(false);
+  const [skills, setSkills] = useState([]);
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [productPreview, setProductPreview] = useState(null);
+  const [isLoadingProductPreview, setIsLoadingProductPreview] = useState(false);
+  const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [jobInitialRequirement, setJobInitialRequirement] = useState("");
+  const [modelSettings, setModelSettings] = useState(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [showModelOnboarding, setShowModelOnboarding] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(
+    () => window.localStorage.getItem("scriptagent:debug-panel") === "true",
+  );
+  const [ownerSession, setOwnerSession] = useState({
+    configured: false,
+    authenticated: false,
+  });
+  const [isCheckingOwnerSession, setIsCheckingOwnerSession] = useState(true);
+  const [ownerOverview, setOwnerOverview] = useState(null);
+  const [isOwnerLoading, setIsOwnerLoading] = useState(false);
+
+  const [chats, setChats] = useState([]);
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatAttachment, setChatAttachment] = useState(null);
+  const [chatProductId, setChatProductId] = useState("");
+  const [optimisticChatMessages, setOptimisticChatMessages] = useState(null);
+  const [typingMessage, setTypingMessage] = useState(null);
+  const [chatCitations, setChatCitations] = useState([]);
+  const [chatAgentSteps, setChatAgentSteps] = useState([]);
+  const [isChatThinking, setIsChatThinking] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [isMainSidebarCollapsed, setIsMainSidebarCollapsed] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem(
+        "scriptagent:main-sidebar-collapsed",
+      );
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
+  });
+  const [isChatHistoryCollapsed, setIsChatHistoryCollapsed] = useState(() => {
+    try {
+      return (
+        window.localStorage.getItem("scriptagent:chat-history-collapsed") ===
+        "true"
+      );
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "scriptagent:main-sidebar-collapsed",
+        String(isMainSidebarCollapsed),
+      );
+    } catch {}
+  }, [isMainSidebarCollapsed]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "scriptagent:chat-history-collapsed",
+        String(isChatHistoryCollapsed),
+      );
+    } catch {}
+  }, [isChatHistoryCollapsed]);
+
+  const [modelCalls, setModelCalls] = useState([]);
+  const [selectedCallId, setSelectedCallId] = useState("");
+  const [error, setError] = useState("");
+
+  async function refreshJobs(nextSelectedId) {
+    const items = await listJobs();
+    setJobs(Array.isArray(items) ? items : []);
+    const targetId = nextSelectedId || selectedJob?.id || items[0]?.id;
+    if (targetId) {
+      const current = await getJob(targetId);
+      setSelectedJob(current);
+    }
+  }
+
+  async function refreshChats(nextSelectedId) {
+    const items = await listChats();
+    setChats(Array.isArray(items) ? items : []);
+    const targetId =
+      nextSelectedId || selectedChat?.conversation?.id || items[0]?.id;
+    if (targetId) {
+      setSelectedChat(await getChat(targetId));
+    }
+  }
+
+  async function refreshModelCalls() {
+    const items = await listModelCalls({ limit: 1000 });
+    setModelCalls(items);
+    if (!selectedCallId && items[0]) {
+      setSelectedCallId(items[0].id);
+    }
+  }
+
+  async function refreshProducts(nextSelectedId) {
+    const items = await listProducts();
+    setProducts(Array.isArray(items) ? items : []);
+    if (nextSelectedId || (!selectedProductId && items[0])) {
+      setSelectedProductId(nextSelectedId || items[0]?.id || "");
+    }
+  }
+  async function refreshSpaces() {
+    const items = await listSpaces();
+    setSpaces(Array.isArray(items) ? items : []);
+  }
+  async function refreshVideos() {
+    const items = await listVideos();
+    setVideos(Array.isArray(items) ? items : []);
+  }
+  async function refreshSuggestions() {
+    const items = await listSuggestions();
+    setSuggestions(Array.isArray(items) ? items : []);
+  }
+
+  async function handleSuggestion(suggestion, status = "accepted") {
+    setError("");
+    try {
+      await updateSuggestionStatus(suggestion.id, status);
+      setSuggestions((items) =>
+        items.filter((item) => item.id !== suggestion.id),
+      );
+      if (status !== "accepted") return;
+      if (
+        suggestion.action_type === "continue_space" ||
+        suggestion.action_type === "open_space"
+      ) {
+        const space = spaces.find(
+          (item) => item.id === suggestion.action_target_id,
+        );
+        if (space) await handleStartSpaceAgent(space);
+        else setView("spaces");
+      } else if (suggestion.action_type === "open_product") {
+        setSelectedProductId(
+          suggestion.action_target_id || suggestion.product_id,
+        );
+        setView("products");
+      } else if (suggestion.action_type === "review_video") {
+        setView("history");
+      } else if (suggestion.action_type === "review_signal") {
+        setView("spaces");
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function refreshSkills() {
+    setSkills(await listSkills());
+  }
+
+  async function handleSaveSkill(input, id = "") {
+    const skill = id ? await updateSkill(id, input) : await createSkill(input);
+    await refreshSkills();
+    return skill;
+  }
+
+  async function refreshModelSettings() {
+    setModelSettings(await getModelSettings());
+  }
+
+  function finishModelOnboarding() {
+    try {
+      window.localStorage.setItem("scriptagent:model-onboarding-v1", "done");
+    } catch {}
+    setShowModelOnboarding(false);
+  }
+
+  async function handleModelOnboardingSave(selection) {
+    setError("");
+    setIsSavingSettings(true);
+    try {
+      const profiles = ["text", "multimodal"].map((capability) => {
+        const catalog = modelCapabilityCatalog.find(
+          (item) => item.id === capability,
+        );
+        const saved = modelSettings?.profiles?.find(
+          (item) => item.capability === capability,
+        );
+        return {
+          capability,
+          mode: saved?.mode || "managed",
+          api_key: "",
+          provider: saved?.provider || "dashscope",
+          endpoint: saved?.endpoint || catalog.endpoint,
+          model: selection[capability] || catalog.models[0].id,
+        };
+      });
+      setModelSettings(await saveModelSettings({ profiles }));
+      finishModelOnboarding();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
+  async function refreshCurrent() {
+    setError("");
+    if (view === "jobs") await refreshJobs();
+    if (view === "chat") await refreshChats();
+    if (view === "calls" && showDebugPanel)
+      await Promise.all([refreshModelCalls(), refreshJobs(), refreshSpaces()]);
+    if (view === "products") await refreshProducts();
+    if (view === "spaces") await refreshSpaces();
+    if (view === "history")
+      await Promise.all([refreshJobs(), refreshChats(), refreshVideos()]);
+    if (view === "settings") await refreshModelSettings();
+    if (isAdminRoute && ownerSession.authenticated)
+      setOwnerOverview(await getOwnerOverview());
+  }
+
+  async function handleOwnerLogin(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setError("");
+    setIsOwnerLoading(true);
+    try {
+      const session = await loginOwner(
+        String(form.get("username") || ""),
+        String(form.get("password") || ""),
+      );
+      setOwnerSession(session);
+      setOwnerOverview(await getOwnerOverview());
+      window.location.assign("/admin");
+      event.currentTarget.reset();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsOwnerLoading(false);
+    }
+  }
+
+  async function handleOwnerLogout() {
+    setIsOwnerLoading(true);
+    setError("");
+    try {
+      const session = await logoutOwner();
+      setOwnerSession(session);
+      setOwnerOverview(null);
+      setView("settings");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsOwnerLoading(false);
+    }
+  }
+
+  async function handleAuthSubmit(mode, values) {
+    setAuthError("");
+    try {
+      const user = await (mode === "register"
+        ? register(values)
+        : login(values));
+      setIsCheckingOwnerSession(true);
+      setCurrentUser(user);
+      setRegistrationAvailable(false);
+      setView("home");
+      return true;
+    } catch (err) {
+      setAuthError(err.message);
+      return false;
+    }
+  }
+
+  async function handleLogout() {
+    await logout().catch(() => {});
+    setOwnerSession({ authenticated: false });
+    setOwnerOverview(null);
+    setView("home");
+    setCurrentUser(null);
+    setSelectedJob(null);
+    setSelectedChat(null);
+    setJobs([]);
+    setProducts([]);
+    setSpaces([]);
+    setSuggestions([]);
+    setChats([]);
+    setSkills([]);
+    setModelCalls([]);
+    setAuthError("");
+  }
+
+  useEffect(() => {
+    Promise.all([getAuthStatus(), getCurrentUser().catch(() => null)])
+      .then(([status, user]) => {
+        setRegistrationAvailable(Boolean(status?.registration_available));
+        setCurrentUser(user);
+      })
+      .catch((err) => setAuthError(err.message))
+      .finally(() => setIsCheckingAuth(false));
+  }, []);
+
+  useEffect(() => {
+    setOwnerSession({ authenticated: false });
+    setOwnerOverview(null);
+    setIsCheckingOwnerSession(Boolean(currentUser));
+    if (!currentUser) return;
+    refreshJobs().catch((err) => setError(err.message));
+    refreshChats().catch(() => {});
+    if (showDebugPanel) refreshModelCalls().catch(() => {});
+    refreshProducts().catch(() => {});
+    refreshSpaces().catch(() => {});
+    refreshSkills().catch(() => {});
+    refreshVideos().catch(() => {});
+    refreshSuggestions().catch(() => {});
+    refreshModelSettings().catch(() => {});
+    getOwnerSession()
+      .then(setOwnerSession)
+      .catch(() => setOwnerSession({ authenticated: false }))
+      .finally(() => setIsCheckingOwnerSession(false));
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!isAdminRoute || !ownerSession.authenticated) return;
+    setIsOwnerLoading(true);
+    getOwnerOverview().then(setOwnerOverview).catch((err) => setError(err.message))
+      .finally(() => setIsOwnerLoading(false));
+  }, [isAdminRoute, ownerSession.authenticated]);
+
+  useEffect(() => {
+    if (!modelSettings) return;
+    if (modelSettings.profiles?.some((profile) => profile.mode === "managed")) {
+      setShowModelOnboarding(false);
+      return;
+    }
+    try {
+      setShowModelOnboarding(
+        window.localStorage.getItem("scriptagent:model-onboarding-v1") !==
+          "done",
+      );
+    } catch {
+      setShowModelOnboarding(false);
+    }
+  }, [modelSettings]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "scriptagent:debug-panel",
+      showDebugPanel ? "true" : "false",
+    );
+    if (!showDebugPanel && view === "calls") {
+      setView("settings");
+    }
+    if (showDebugPanel) {
+      refreshModelCalls().catch(() => {});
+    }
+  }, [showDebugPanel]);
+
+  useEffect(() => {
+    if (!selectedJob || !runningStatuses.has(selectedJob.status)) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      refreshJobs(selectedJob.id).catch((err) => setError(err.message));
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [selectedJob?.id, selectedJob?.status]);
+
+  useEffect(() => {
+    if (
+      !videos.some((item) =>
+        ["pending", "submitting", "submitted", "running"].includes(item.status),
+      )
+    )
+      return undefined;
+    const timer = window.setInterval(
+      () => refreshVideos().catch(() => {}),
+      3000,
+    );
+    return () => window.clearInterval(timer);
+  }, [videos.map((item) => `${item.id}:${item.status}`).join("|")]);
+
+  useEffect(() => {
+    if (activeTab !== "video_prompts") return undefined;
+    if (!selectedJob?.id) return undefined;
+    let cancelled = false;
+    setError("");
+    setIsGeneratingVideoPrompts(true);
+    generateVideoPrompts(selectedJob.id)
+      .then((result) => {
+        if (!cancelled) setVideoPromptContent(result.content || "");
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setVideoPromptContent("");
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsGeneratingVideoPrompts(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, selectedJob?.id]);
+
+  useEffect(() => {
+    if (view !== "products" || !selectedProductId) {
+      setProductPreview(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setIsLoadingProductPreview(true);
+    getProductMarkdown(selectedProductId)
+      .then((preview) => {
+        if (!cancelled) setProductPreview(preview);
+      })
+      .catch((err) => {
+        if (!cancelled) setProductPreview({ error: err.message });
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingProductPreview(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, selectedProductId]);
+
+  useEffect(() => {
+    if (
+      !typingMessage ||
+      typingMessage.visible.length >= typingMessage.content.length
+    ) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setTypingMessage((current) => {
+        if (!current) return current;
+        const nextLength = Math.min(
+          current.content.length,
+          current.visible.length + typingStep(current.content.length),
+        );
+        return { ...current, visible: current.content.slice(0, nextLength) };
+      });
+    }, 18);
+    return () => window.clearTimeout(timer);
+  }, [typingMessage]);
+
+  useEffect(() => {
+    if (
+      !typingMessage ||
+      typingMessage.visible.length < typingMessage.content.length
+    ) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setTypingMessage(null);
+      setOptimisticChatMessages(null);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [typingMessage]);
+
+  async function handleCreate(event) {
+    event.preventDefault();
+    const formEl = event.currentTarget;
+    setError("");
+    setIsCreating(true);
+    const form = new FormData(formEl);
+    try {
+      const created = await createJob(form);
+      formEl.reset();
+      setActiveTab("run_log");
+      setVideoPromptContent("");
+      setJobInitialRequirement("");
+      await refreshJobs(created.job_id);
+      await refreshProducts();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsCreating(false);
+    }
+  }
+
+  async function handleCreateVideo(input) {
+    setError("");
+    setIsCreatingVideo(true);
+    try {
+      if (!input.conversation_id) {
+        const conversation = await createChat("视频创作");
+        input = { ...input, conversation_id: conversation.id };
+        await handleSelectChat(conversation.id);
+      }
+      await createVideo(input);
+      await refreshVideos();
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    } finally {
+      setIsCreatingVideo(false);
+    }
+  }
+
+  async function handleRetryVideo(id) {
+    setError("");
+    try {
+      await retryVideo(id);
+      await refreshVideos();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleOpenVideoHistory(videoID, conversationID) {
+    if (conversationID) {
+      await handleSelectChat(conversationID);
+      setView("chat");
+      return;
+    }
+    window.open(
+      `/api/videos/${videoID}/file`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  async function handleSelectJob(id) {
+    setError("");
+    setActiveTab("run_log");
+    setVideoPromptContent("");
+    setSelectedJob(await getJob(id));
+  }
+
+  async function handleRetry() {
+    if (!selectedJob) return;
+    setError("");
+    setIsRetrying(true);
+    try {
+      const retried = await retryJob(selectedJob.id);
+      setActiveTab("run_log");
+      setVideoPromptContent("");
+      await refreshJobs(retried.job_id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsRetrying(false);
+    }
+  }
+
+  async function handleSelectChat(id) {
+    setError("");
+    const returningToRunningChat = isSending && id === selectedChat?.conversation?.id;
+    if (!returningToRunningChat) {
+      setOptimisticChatMessages(null);
+      setTypingMessage(null);
+      setChatCitations([]);
+      setChatAgentSteps([]);
+      setIsChatThinking(false);
+    }
+    setChatAttachment(null);
+    const thread = await getChat(id);
+    setSelectedChat(thread);
+    const sourceSpace = spaces.find(
+      (space) => space.id === thread.conversation?.space_id,
+    );
+    setChatProductId(
+      sourceSpace?.product_id || thread.conversation?.product_id || "",
+    );
+  }
+
+  async function handleAssignChatSpace(spaceId) {
+    const space = spaces.find((item) => item.id === spaceId);
+    if (!space) return;
+    setError("");
+    try {
+      if (selectedChat?.conversation?.id) {
+        const thread = await assignChatSpace(selectedChat.conversation.id, space.id);
+        setSelectedChat(thread);
+        await Promise.all([refreshChats(thread.conversation.id), refreshVideos()]);
+      } else {
+        setSelectedChat({ conversation: { space_id: space.id, product_id: space.product_id || "", title: space.title }, messages: [] });
+      }
+      setChatProductId(space.product_id || "");
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }
+
+  function handleNewChat() {
+    setError("");
+    setSelectedChat(null);
+    setOptimisticChatMessages(null);
+    setTypingMessage(null);
+    setChatCitations([]);
+    setChatAgentSteps([]);
+    setIsChatThinking(false);
+    setChatAttachment(null);
+    setChatProductId("");
+  }
+
+  async function sendChatToAgent(
+    content,
+    productID,
+    conversationID = "",
+    attachment = null,
+    spaceID = "",
+  ) {
+    content = content.trim();
+    if (!content && !attachment) return;
+    const videoRequest = parseVideoSkillRequest(content);
+    if (videoRequest) {
+      const previousMessages = conversationID ? selectedChat?.messages || [] : [];
+      const latestScript = [...previousMessages].reverse().find((message) => message.role === "assistant" && hasVideoScript(visibleAssistantContent(message.content || "")));
+      const previous = visibleAssistantContent(latestScript?.content || lastAssistantMessage(previousMessages)?.content || "");
+      setError(""); setChatDraft(""); setChatProductId(productID); setView("chat");
+      setVideoSkillRequest({ prompt: videoRequest.prompt || previous, context: videoDraftContext(previousMessages) });
+      return;
+    }
+    setError("");
+    setIsSending(true);
+    setIsChatThinking(true);
+    setTypingMessage(null);
+    setChatCitations([]);
+    setChatAgentSteps([]);
+    const displayContent = [
+      content || "请分析我上传的素材。",
+      attachment ? `附件：${attachment.name}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const tempUserMessage = {
+      id: `temp-user-${Date.now()}`,
+      role: "user",
+      content: displayContent,
+      attachments: attachment ? [{ id: "", kind: attachment.type.startsWith("video/") ? "video" : "image", original_name: attachment.name, file: attachment }] : [],
+      created_at: new Date().toISOString(),
+    };
+    const continuingCurrentChat = Boolean(
+      conversationID && selectedChat?.conversation?.id === conversationID,
+    );
+    const baseMessages = continuingCurrentChat
+      ? selectedChat?.messages || []
+      : [];
+    setOptimisticChatMessages([...baseMessages, tempUserMessage]);
+    setChatDraft("");
+    setChatAttachment(null);
+    let progressTimer;
+    const refreshChatProgress = async () => {
+      if (!conversationID) return;
+      try {
+        const progress = await getChatProgress(conversationID);
+        setChatAgentSteps(progress.steps || []);
+      } catch {
+        // Progress is optional; the message request remains authoritative.
+      }
+    };
+    try {
+      const messageRequest = conversationID
+        ? sendChatMessage(conversationID, content, productID, attachment)
+        : sendNewChatMessage(content, productID, attachment, spaceID);
+      if (conversationID) {
+        progressTimer = window.setInterval(refreshChatProgress, 250);
+      }
+      const thread = await messageRequest;
+      const assistantMessage = lastAssistantMessage(thread.messages);
+      setSelectedChat(thread);
+      setChatCitations(thread.citations || []);
+      setChatAgentSteps(thread.agent_steps || []);
+      if (assistantMessage) {
+        setOptimisticChatMessages(
+          thread.messages.filter(
+            (message) => message.id !== assistantMessage.id,
+          ),
+        );
+        setTypingMessage({ ...assistantMessage, visible: "" });
+      } else {
+        setOptimisticChatMessages(null);
+      }
+      await refreshChats(thread.conversation.id);
+      if (showDebugPanel) {
+        await refreshModelCalls();
+      }
+    } catch (err) {
+      setError("");
+      setChatAttachment(attachment);
+      setTypingMessage(null);
+      setOptimisticChatMessages((current) => [
+        ...(current || [tempUserMessage]),
+        {
+          id: `temp-error-${Date.now()}`,
+          role: "assistant",
+          content: `暂时无法生成：${err.message}`,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+    } finally {
+      if (progressTimer) window.clearInterval(progressTimer);
+      setIsChatThinking(false);
+      setIsSending(false);
+    }
+  }
+
+  async function handleSendChat(event) {
+    event.preventDefault();
+    const conversationID = selectedChat?.conversation?.id || "";
+    await sendChatToAgent(
+      chatDraft,
+      chatProductId,
+      conversationID,
+      chatAttachment,
+      selectedChat?.conversation?.space_id || "",
+    );
+  }
+
+  async function handleStartAgentChat(productID, goal, attachment = null) {
+    setView("chat");
+    setSelectedChat(null);
+    setChatProductId(productID || "");
+    await sendChatToAgent(goal, productID || "", "", attachment);
+  }
+
+  function handleStartVideoSkill(productID, prompt) {
+    setSelectedChat(null);
+    setChatProductId(productID || "");
+    setVideoSkillRequest({ prompt: prompt.trim() });
+    setView("chat");
+  }
+
+  async function handleStartSpaceAgent(space) {
+    if (!space) return;
+    setError("");
+    setView("chat");
+    setSelectedChat({
+      conversation: {
+        space_id: space.id,
+        product_id: space.product_id || "",
+        title: space.title,
+      },
+      messages: [],
+    });
+    setChatProductId(space.product_id || "");
+    setOptimisticChatMessages(null);
+    setTypingMessage(null);
+    setChatCitations([]);
+    setChatAgentSteps([]);
+    setIsChatThinking(false);
+    setChatAttachment(null);
+    setChatDraft("");
+  }
+
+  async function handleCreateProduct(eventOrForm) {
+    const isFormData = Boolean(
+      eventOrForm &&
+      typeof eventOrForm.append === "function" &&
+      typeof eventOrForm.get === "function",
+    );
+    if (!isFormData) eventOrForm.preventDefault();
+    const formEl = isFormData ? null : eventOrForm.currentTarget;
+    const form = isFormData ? eventOrForm : new FormData(formEl);
+    setError("");
+    setIsCreatingProduct(true);
+    try {
+      const product = await createProduct(form);
+      await refreshProducts(product.id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsCreatingProduct(false);
+    }
+  }
+
+  async function handleSaveModelSettings(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setError("");
+    setIsSavingSettings(true);
+    try {
+      const profiles = modelCapabilityCatalog.map((item) => {
+        const saved = modelSettings?.profiles?.find((profile) => profile.capability === item.id);
+        const provider = String(form.get(`${item.id}_provider`) || saved?.provider || item.provider || "dashscope");
+        const selectedModel = String(form.get(`${item.id}_model`) || saved?.model || item.models[0].id);
+        const enteredEndpoint = String(form.get(`${item.id}_endpoint`) || saved?.endpoint || item.endpoint);
+        return {
+          capability: item.id,
+          mode: String(form.get(`${item.id}_mode`) || "byok"),
+          api_key: String(form.get(`${item.id}_api_key`) || ""),
+          provider,
+          endpoint: enteredEndpoint,
+          model: selectedModel,
+        };
+      });
+      const next = await saveModelSettings({ profiles });
+      setModelSettings(next);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
+  const visibleContent =
+    activeTab === "video_prompts"
+      ? videoPromptContent
+      : selectedJob?.[activeTab] || "";
+  const canRetry = selectedJob && !runningStatuses.has(selectedJob.status);
+  const selectedCall =
+    modelCalls.find((call) => call.id === selectedCallId) || modelCalls[0];
+  function handleStartProductJob(productId, requirement = "", spaceId = "") {
+    setSelectedProductId(productId);
+    setJobInitialRequirement(requirement);
+    window.sessionStorage.setItem("scriptagent:space-id", spaceId);
+    setView("jobs");
+  }
+
+  async function handleUpdateProduct(id, title, content) {
+    setError("");
+    setIsSavingProduct(true);
+    try {
+      await updateProduct(id, { title, content });
+      await refreshProducts(id);
+      setProductPreview(await getProductMarkdown(id));
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setIsSavingProduct(false);
+    }
+  }
+  async function handleCreateSpace(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setError("");
+    setIsCreatingSpace(true);
+    const formEl = event.currentTarget;
+    try {
+      await createSpace({
+        title: String(form.get("title") || ""),
+        summary: String(form.get("summary") || ""),
+        product_id: String(form.get("product_id") || ""),
+        agent_brief: String(form.get("agent_brief") || ""),
+        marketing_goal: String(form.get("marketing_goal") || "conversion"),
+        goal_stage: String(form.get("goal_stage") || "action"),
+      });
+      formEl.reset();
+      await refreshSpaces();
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    } finally {
+      setIsCreatingSpace(false);
+    }
+  }
+
+  async function handleUpdateSpace(id, input) {
+    setError("");
+    const updated = await updateSpace(id, input);
+    await refreshSpaces();
+    if (selectedChat?.conversation?.space_id === id)
+      setChatProductId(updated.product_id || "");
+    return updated;
+  }
+
+  async function handleDeleteSpace(id) {
+    setError("");
+    try {
+      await deleteSpace(id);
+      await refreshSpaces();
+      if (selectedChat?.conversation?.space_id === id) handleNewChat();
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }
+
+  function handleCreateIntelligenceTask(space, signal) {
+    setError("");
+    setView("chat");
+    setSelectedChat({
+      conversation: {
+        space_id: space.id,
+        product_id: space.product_id || "",
+        title: space.title,
+      },
+      messages: [],
+    });
+    setChatProductId(space.product_id || "");
+    setOptimisticChatMessages(null);
+    setTypingMessage(null);
+    setChatCitations([]);
+    setChatAgentSteps([]);
+    setIsChatThinking(false);
+    setChatAttachment(null);
+    setChatDraft(
+      `基于创意情报“${signal.title}”设计下一轮可验证的素材实验。证据：${signal.summary}`,
+    );
+  }
+
+  if (isCheckingAuth)
+    return (
+      <div className="auth-shell">
+        <div className="auth-card auth-loading">
+          <img src={agentIcon} alt="" />
+          <Loader2 className="spin" size={20} />
+          <p>正在检查登录状态</p>
+        </div>
+      </div>
+    );
+  if (!currentUser)
+    return (
+      <AuthGate
+        error={authError}
+        registrationAvailable={!isAdminRoute && registrationAvailable}
+        adminPortal={isAdminRoute}
+        onSubmit={handleAuthSubmit}
+      />
+    );
+
+  if (isAdminRoute) {
+    if (isCheckingOwnerSession) return <main className="admin-access"><section><Loader2 className="spin" size={24} /><p>正在验证管理员身份</p></section></main>;
+    if (currentUser.role !== "admin" || !ownerSession.authenticated) {
+      return <main className="admin-access"><section><h1>无法访问运营后台</h1><p>请使用管理员账号登录。</p><a href="/">返回工作台</a></section></main>;
+    }
+    return <div className="admin-shell">
+      <div className="admin-main"><AdminConsole overview={ownerOverview} isLoading={isOwnerLoading} error={error} onRefresh={() => refreshCurrent().catch((err) => setError(err.message))} onLogout={handleLogout} /></div>
+    </div>;
+  }
+
+  return (
+    <div className="app-shell agent-app-shell">
+      {showModelOnboarding ? (
+        <ModelOnboarding
+          modelSettings={modelSettings}
+          isSaving={isSavingSettings}
+          error={error}
+          onSave={handleModelOnboardingSave}
+          onLater={finishModelOnboarding}
+          onSettings={() => {
+            finishModelOnboarding();
+            setView("settings");
+          }}
+        />
+      ) : null}
+      <AppSidebar
+        recentItems={[...chats.map(item => ({...item, kind: "chat"})), ...jobs.map(item => ({...item, kind: "job"}))].sort((a,b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))}
+        onRecent={item => (item.kind === "chat" ? handleSelectChat(item.id).then(() => setView("chat")) : handleSelectJob(item.id).then(() => setView("jobs"))).catch(err => setError(err.message))}
+        view={view}
+        onChange={setView}
+        icon={agentIcon}
+        collapsed={isMainSidebarCollapsed}
+        onToggle={() => setIsMainSidebarCollapsed((value) => !value)}
+        showDebugPanel={showDebugPanel}
+        ownerAuthenticated={currentUser?.role === "admin" && ownerSession.authenticated}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
+      <div className="agent-frame">
+        <main
+          className={`workspace ${view === "toolbox" ? "toolbox-workspace" : ""} ${view === "products" || view === "calls" || view === "admin" || view === "settings" ? "workspace-home" : ""} ${view === "chat" && isChatHistoryCollapsed ? "chat-history-collapsed" : ""}`}
+        >
+          {view === "jobs" ? (
+            <JobsSidebar
+              jobs={jobs}
+              selectedJob={selectedJob}
+              onSelect={handleSelectJob}
+            />
+          ) : null}
+          {view === "chat" ? (
+            <ChatSidebar
+              chats={chats}
+              selectedChat={selectedChat}
+              collapsed={isChatHistoryCollapsed}
+              onSelect={handleSelectChat}
+              onNew={handleNewChat}
+              onToggle={() =>
+                setIsChatHistoryCollapsed(!isChatHistoryCollapsed)
+              }
+            />
+          ) : null}
+
+          <section
+            className={`main-pane ${view === "toolbox" ? "toolbox-pane" : ""} ${view === "products" || view === "calls" || view === "admin" ? "main-pane-home" : ""}`}
+          >
+            <div className="toolbox-host" hidden={view !== "toolbox"}>
+              <EcommerceToolbox key={currentUser.id} userId={currentUser.id} products={products} active={view === "toolbox"} entry={toolboxEntry} onOpenProducts={(productId) => { setView("products"); refreshProducts(productId).catch((err) => setError(err.message)); }} />
+            </div>
+            {view === "home" ? (
+              <AgentStart
+                products={products}
+                skills={skills}
+                spaces={spaces}
+                suggestions={suggestions}
+                isSending={isSending}
+                onSend={handleStartAgentChat}
+                onVideoSkill={handleStartVideoSkill}
+                onCreateSkill={handleSaveSkill}
+                onSpaces={() => setView("spaces")}
+                onToolbox={(mode) => { setToolboxEntry({ mode, id: Date.now() }); setView("toolbox"); }}
+                onSuggestion={handleSuggestion}
+              />
+            ) : null}
+            {view === "history" ? (
+              <HistoryWorkspace
+                jobs={jobs}
+                chats={chats}
+                videos={videos}
+                products={products}
+                onJob={(id) => handleSelectJob(id).then(() => setView("jobs"))}
+                onChat={(id) =>
+                  handleSelectChat(id).then(() => setView("chat"))
+                }
+                onVideo={handleOpenVideoHistory}
+              />
+            ) : null}
+            {view === "spaces" ? (
+              <SpacesWorkspace
+                spaces={spaces}
+                products={products}
+                videos={videos}
+                onConversation={handleOpenVideoHistory}
+                suggestions={suggestions}
+                isCreating={isCreatingSpace}
+                isSending={isSending}
+                error={error}
+                onCreate={handleCreateSpace}
+                onUpdate={handleUpdateSpace}
+                onDelete={handleDeleteSpace}
+                onStart={handleStartSpaceAgent}
+                onSuggestion={handleSuggestion}
+              />
+            ) : null}
+            {view === "jobs" ? (
+              <JobsWorkspace
+                selectedJob={selectedJob}
+                activeTab={activeTab}
+                visibleContent={visibleContent}
+                isGeneratingVideoPrompts={isGeneratingVideoPrompts}
+                isCreating={isCreating}
+                isRetrying={isRetrying}
+                canRetry={canRetry}
+                products={products}
+                initialProductId={selectedProductId}
+                initialRequirement={jobInitialRequirement}
+                error={error}
+                onCreate={handleCreate}
+                onRetry={handleRetry}
+                onTab={setActiveTab}
+              />
+            ) : null}
+            {view === "products" ? (
+              <ProductKnowledgeWorkspace
+                products={products}
+                selectedProductId={selectedProductId}
+                productPreview={productPreview}
+                isLoadingProductPreview={isLoadingProductPreview}
+                isCreatingProduct={isCreatingProduct}
+                isSavingProduct={isSavingProduct}
+                error={error}
+                onSelect={setSelectedProductId}
+                onStartJob={handleStartProductJob}
+                onCreate={handleCreateProduct}
+                onUpdate={handleUpdateProduct}
+              />
+            ) : null}
+            {view === "chat" ? (
+              <ChatWorkspace
+                thread={selectedChat}
+                optimisticMessages={optimisticChatMessages}
+                typingMessage={typingMessage}
+                citations={chatCitations}
+                agentSteps={chatAgentSteps}
+                isThinking={isChatThinking}
+                draft={chatDraft}
+                products={products}
+                skills={skills}
+                selectedProductId={chatProductId}
+                isSending={isSending}
+                error={error}
+                attachment={chatAttachment}
+                videos={videos}
+                isCreatingVideo={isCreatingVideo}
+                onDraft={setChatDraft}
+                onAttachment={setChatAttachment}
+                onProduct={setChatProductId}
+                sourceSpace={spaces.find(
+                  (space) => space.id === selectedChat?.conversation?.space_id,
+                )}
+                spaces={spaces}
+                onAssignSpace={handleAssignChatSpace}
+                historyCollapsed={isChatHistoryCollapsed}
+                onHistoryToggle={() => setIsChatHistoryCollapsed(false)}
+                onEditSpace={() => setView("spaces")}
+                onCreateSkill={handleSaveSkill}
+                onCreateVideo={handleCreateVideo}
+                videoModel={modelSettings?.profiles?.find((profile) => profile.capability === "video_generation")?.model || "seedance-2.0"}
+                onRetryVideo={handleRetryVideo}
+                videoSkillRequest={videoSkillRequest}
+                onVideoSkillHandled={() => setVideoSkillRequest(null)}
+                onSend={handleSendChat}
+              />
+            ) : null}
+            {view === "calls" && showDebugPanel ? (
+              <ModelCallsWorkspace
+                calls={modelCalls}
+                jobs={jobs}
+                spaces={spaces}
+                error={error}
+              />
+            ) : null}
+            {view === "settings" ? (
+              modelSettings?.profiles?.some((profile) => profile.mode === "managed") && currentUser?.role !== "admin" ? <ManagedCreditsPanel /> : <SettingsWorkspace
+                modelSettings={modelSettings}
+                canUseManaged={currentUser?.role === "admin"}
+                showDebugPanel={showDebugPanel}
+                isSaving={isSavingSettings}
+                error={error}
+                onDebugPanel={setShowDebugPanel}
+                onSave={handleSaveModelSettings}
+                ownerSession={currentUser?.role === "admin" ? ownerSession : { authenticated: false }}
+                isOwnerLoading={isOwnerLoading}
+                onOwnerLogin={handleOwnerLogin}
+              />
+            ) : null}
+          </section>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function AuthGate({ error, registrationAvailable, adminPortal = false, onSubmit }) {
+  const [mode, setMode] = useState("login");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!registrationAvailable) setMode("login");
+  }, [registrationAvailable]);
+
+  async function submit(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setIsSubmitting(true);
+    await onSubmit(mode, {
+      name: String(form.get("name") || ""),
+      email: String(form.get("email") || ""),
+      password: String(form.get("password") || ""),
+	  invite_code: String(form.get("invite_code") || ""),
+    });
+    setIsSubmitting(false);
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card" aria-labelledby="auth-title">
+        <div className="auth-brand">
+          <img src={agentIcon} alt="" />
+          <div>
+            <strong>BriefOnce <small className="product-beta">Beta</small></strong>
+            <span>让每次创作都有目标、有依据</span>
+          </div>
+        </div>
+        <div className="auth-heading">
+          <span className="eyebrow">
+            {mode === "register" ? "受邀加入" : adminPortal ? "管理员入口" : "欢迎回来"}
+          </span>
+          <h1 id="auth-title">
+            {mode === "register" ? "创建账号" : adminPortal ? "登录运营后台" : "登录工作台"}
+          </h1>
+          <p>
+            {mode === "register"
+              ? "全新实例的首个账号可直接创建；后续账号需要邀请码。"
+              : "登录后继续使用你的创意空间和产品资料。"}
+          </p>
+        </div>
+        {registrationAvailable ? (
+          <div className="auth-tabs" role="tablist">
+            <button
+              type="button"
+              className={mode === "login" ? "active" : ""}
+              onClick={() => setMode("login")}
+            >
+              登录
+            </button>
+            <button
+              type="button"
+              className={mode === "register" ? "active" : ""}
+              onClick={() => setMode("register")}
+            >
+              注册
+            </button>
+          </div>
+        ) : null}
+        <form className="auth-form" onSubmit={submit}>
+          {mode === "register" ? (
+            <label>
+              <span>称呼</span>
+              <input name="name" autoComplete="name" placeholder="怎么称呼你" />
+            </label>
+          ) : null}
+          <label>
+            <span>邮箱</span>
+            <div className="auth-input">
+              <Mail size={18} />
+              <input
+                name="email"
+                type="email"
+                autoComplete="email"
+                placeholder="name@example.com"
+                required
+              />
+            </div>
+          </label>
+          <label>
+            <span>密码</span>
+            <div className="auth-input">
+              <ShieldCheck size={18} />
+              <input
+                name="password"
+                type="password"
+                autoComplete={
+                  mode === "register" ? "new-password" : "current-password"
+                }
+                placeholder="至少 8 位"
+                minLength={8}
+                required
+              />
+            </div>
+          </label>
+		  {mode === "register" ? (
+			<label>
+			  <span>邀请码</span>
+			  <div className="auth-input">
+				<ShieldCheck size={18} />
+				<input name="invite_code" autoComplete="off" placeholder="首个注册账号可留空" />
+			  </div>
+			</label>
+		  ) : null}
+          {error ? (
+            <div className="auth-error" role="alert">
+              {error}
+            </div>
+          ) : null}
+          <button
+            className="primary auth-submit"
+            type="submit"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="spin" size={18} />
+                处理中
+              </>
+            ) : mode === "register" ? (
+              "创建账号并进入"
+            ) : (
+              "登录"
+            )}
+          </button>
+        </form>
+        <p className="auth-note">
+          每个账号拥有独立的产品资料、创意空间、对话与模型配置。
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function AppSidebar({
+  recentItems = [],
+  onRecent,
+  view,
+  onChange,
+  icon,
+  collapsed,
+  onToggle,
+  showDebugPanel,
+  ownerAuthenticated,
+  currentUser,
+  onLogout,
+}) {
+  const [creditData, setCreditData] = useState(null);
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let active = true;
+    const refresh = () => getMyCredits()
+      .then((data) => { if (active) setCreditData(data?.account?.managed_enabled ? data : null); })
+      .catch(() => { if (active) setCreditData(null); });
+    refresh();
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; window.clearInterval(interval); window.removeEventListener("focus", refresh); };
+  }, [currentUser?.id]);
+  const credit = creditData?.account;
+  const dailyUsed = Math.max(0, Number(creditData?.daily_used) || 0);
+  const dailyLimit = Math.max(0, Number(credit?.daily_limit) || 0);
+  const progress = dailyLimit > 0 ? Math.min(100, Math.round(dailyUsed / dailyLimit * 100)) : 0;
+  const avatar = <span className={`account-avatar-ring ${credit ? "has-credit" : ""}`} style={credit ? { "--credit-progress": `${progress}%` } : undefined} aria-hidden="true"><span className="account-avatar">{(currentUser?.name || currentUser?.email || "A").slice(0,1).toUpperCase()}</span></span>;
+  const items = [
+    ["home", "创作", House],
+    ["spaces", "创意空间", FolderKanban],
+    ["products", "产品资料", Package],
+    ["toolbox", "工具箱", BriefcaseBusiness],
+  ];
+  const navButton = (id, label, Icon) => (
+    <button
+      key={id}
+      className={view === id ? "active" : ""}
+      type="button"
+      title={collapsed ? label : undefined}
+      aria-label={label}
+      onClick={() => onChange(id)}
+    >
+      <Icon size={19} />
+      <span>{label}</span>
+    </button>
+  );
+  return (
+    <aside className={`app-sidebar ${collapsed ? "collapsed" : ""}`}>
+      <button
+        className="agent-brand"
+        type="button"
+        onClick={onToggle}
+        title={collapsed ? "展开主菜单" : "收起主菜单"}
+        aria-label={collapsed ? "展开主菜单" : "收起主菜单"}
+      >
+        <img src={icon} alt="" />
+        <span>BriefOnce <small className="product-beta">Beta</small></span>
+        {collapsed ? null : (
+          <ChevronLeft className="sidebar-collapse-mark" size={16} />
+        )}
+      </button>
+      <nav>{items.map(([id, label, Icon]) => navButton(id, label, Icon))}</nav>
+      <details className="sidebar-recents" open={!collapsed}>
+        <summary title="最近创作"><History size={17}/><span>最近创作</span></summary>
+        <div className="sidebar-recent-list">
+          <div className="sidebar-recent-items">
+            {!collapsed && (recentItems.length ? recentItems.map(item => <button type="button" key={`${item.kind}-${item.id}`} title={item.title || "未命名创作"} onClick={() => onRecent(item)}>{item.title || "未命名创作"}</button>) : <span className="sidebar-recent-empty">暂无最近创作</span>)}
+          </div>
+          <button className="sidebar-recent-all" type="button" onClick={() => onChange("history")} aria-label="查看全部历史">
+            <span>查看全部</span><ChevronRight size={15} aria-hidden="true" />
+          </button>
+        </div>
+      </details>
+      <div className="sidebar-bottom">
+        <details className="sidebar-account-menu">
+        <summary title={credit?.unlimited ? "本地测试管理员 · 积分不限" : credit ? `剩余 ${credit.balance} 积分，今日已用 ${dailyUsed} / ${dailyLimit}` : "账号与设置"} aria-label={credit?.unlimited ? "账号与设置，本地测试管理员积分不限" : credit ? `账号与设置，剩余 ${credit.balance} 积分，今日已用 ${dailyUsed} / ${dailyLimit}` : "账号与设置"}>{avatar}<span className="account-copy"><strong>{currentUser?.name || "用户"}</strong><small>{credit?.unlimited ? "本地测试 · 积分不限" : credit ? `剩余 ${credit.balance} 积分 · 今日 ${dailyUsed}/${dailyLimit}` : currentUser?.email}</small></span></summary>
+        <div className="sidebar-account-options" onClick={event => {if(event.target.closest("button")) event.currentTarget.closest("details").open = false;}}>
+        {ownerAuthenticated ? <a className="sidebar-admin-link" href="/admin"><ChartNoAxesCombined size={19} /><span>运营后台</span></a> : null}
+        {showDebugPanel ? navButton("calls", "开发者模式", Activity) : null}
+        {navButton("settings", "设置", Settings)}
+        <div className="sidebar-account" hidden>
+          <span className="account-avatar">
+            {(currentUser?.name || currentUser?.email || "A")
+              .slice(0, 1)
+              .toUpperCase()}
+          </span>
+          <span className="account-copy">
+            <strong>{currentUser?.name || "用户"}</strong>
+            <small>{currentUser?.email}</small>
+          </span>
+          <button
+            className="account-logout"
+            type="button"
+            onClick={onLogout}
+            title="退出登录"
+            aria-label="退出登录"
+          >
+            <LogOut size={17} />
+          </button>
+        </div>
+        <button type="button" onClick={onLogout}><LogOut size={17}/><span>退出登录</span></button>
+        </div>
+        </details>
+      </div>
+    </aside>
+  );
+}
+
+function JobsSidebar({ jobs, selectedJob, onSelect }) {
+  return (
+    <aside className="history-pane">
+      <div className="pane-heading">
+        <History size={16} />
+        <span>历史记录</span>
+      </div>
+      <div className="history-list">
+        {jobs.length ? (
+          jobs.map((job) => (
+            <button
+              key={job.id}
+              className={`history-item ${selectedJob?.id === job.id ? "active" : ""}`}
+              type="button"
+              onClick={() => onSelect(job.id).catch(() => {})}
+            >
+              <span className="history-title">{job.title}</span>
+              <span className="history-meta">{job.video_original_name}</span>
+              <span className={`status-pill ${statusTone(job.status)}`}>
+                {statusLabel(job.status)}
+              </span>
+            </button>
+          ))
+        ) : (
+          <EmptyState text="暂无生成记录" compact />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function ChatSidebar({
+  chats,
+  selectedChat,
+  collapsed,
+  onSelect,
+  onNew,
+  onToggle,
+}) {
+  if (collapsed) {
+    return null;
+  }
+  return (
+    <aside className="history-pane chat-history-pane">
+      <div className="pane-heading split">
+        <span>
+          <MessageSquare size={16} />
+          <b>对话记录</b>
+        </span>
+        <div className="chat-history-actions">
+          <button className="mini-button" type="button" onClick={onNew}>
+            新对话
+          </button>
+          <button
+            className="history-toggle"
+            type="button"
+            onClick={onToggle}
+            title={collapsed ? "展开历史对话" : "收起历史对话"}
+            aria-label={collapsed ? "展开历史对话" : "收起历史对话"}
+          >
+            <ChevronLeft size={17} />
+          </button>
+        </div>
+      </div>
+      <div className="history-list">
+        {chats.length ? (
+          chats.map((chat) => (
+            <button
+              key={chat.id}
+              className={`history-item ${selectedChat?.conversation?.id === chat.id ? "active" : ""}`}
+              type="button"
+              onClick={() => onSelect(chat.id).catch(() => {})}
+            >
+              <span className="history-title">{chat.title}</span>
+              <time className="history-meta">
+                {formatChatTime(chat.updated_at)}
+              </time>
+            </button>
+          ))
+        ) : (
+          <EmptyState text="暂无对话" compact />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function CallsSidebar({ calls, selectedCallId, onSelect }) {
+  return (
+    <aside className="history-pane">
+      <div className="pane-heading">
+        <Activity size={16} />
+        <span>模型调用</span>
+      </div>
+      <div className="history-list">
+        {calls.length ? (
+          calls.map((call) => (
+            <button
+              key={call.id}
+              className={`history-item ${selectedCallId === call.id ? "active" : ""}`}
+              type="button"
+              onClick={() => onSelect(call.id)}
+            >
+              <span className="history-title">{call.step || call.scope}</span>
+              <span className="history-meta">
+                {call.scope} · {call.total_tokens || 0} tokens
+              </span>
+              <span
+                className={`status-pill ${call.error_message ? "danger" : "success"}`}
+              >
+                {call.error_message ? "失败" : "成功"}
+              </span>
+            </button>
+          ))
+        ) : (
+          <EmptyState text="暂无调用记录" compact />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function JobsWorkspace(props) {
+  const [fissionCount, setFissionCount] = useState(5);
+  const [selectedProductID, setSelectedProductID] = useState(
+    props.initialProductId || "",
+  );
+  const [requirementDraft, setRequirementDraft] = useState(
+    props.initialRequirement || "",
+  );
+
+  useEffect(() => {
+    setSelectedProductID(props.initialProductId || "");
+  }, [props.initialProductId]);
+
+  useEffect(() => {
+    setRequirementDraft(props.initialRequirement || "");
+  }, [props.initialRequirement]);
+
+  function handleFissionCountChange(event) {
+    const next = Number.parseInt(event.target.value, 10);
+    setFissionCount(
+      Number.isFinite(next) ? Math.min(20, Math.max(1, next)) : 1,
+    );
+  }
+
+  return (
+    <>
+      <section className="composer">
+        <div>
+          <h1>创建脚本任务</h1>
+          <p>先确认产品资产，再上传参考视频生成复刻脚本与裂变脚本。</p>
+        </div>
+        <form className="task-form" onSubmit={props.onCreate}>
+          <input
+            type="hidden"
+            name="space_id"
+            value={window.sessionStorage.getItem("scriptagent:space-id") || ""}
+          />
+          <div className="form-section">
+            <div className="section-heading">
+              <span>1. 产品资产</span>
+              <small>产品信息决定脚本是否有卖点和细节</small>
+            </div>
+            <label>
+              <span>选择产品</span>
+              <select
+                name="product_id"
+                value={selectedProductID}
+                onChange={(event) => setSelectedProductID(event.target.value)}
+              >
+                <option value="">上传新产品 Markdown</option>
+                {props.products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedProductID ? (
+              <div className="selected-product-note">
+                <Package size={15} />
+                <span>已选择产品库资料，本次任务会复用该产品 Markdown。</span>
+              </div>
+            ) : (
+              <div className="upload-grid">
+                <label>
+                  <span>新产品名称</span>
+                  <input
+                    name="product_title"
+                    type="text"
+                    placeholder="默认使用 Markdown 文件名"
+                  />
+                </label>
+                <FileField
+                  name="product_md"
+                  label="产品 Markdown"
+                  accept=".md,.markdown,text/markdown"
+                  icon={<FileText size={16} />}
+                  required={!selectedProductID}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="form-section split-section">
+            <div className="settings-panel">
+              <div className="section-heading compact-heading">
+                <span>2. 参考视频</span>
+                <small>上传要复刻结构和节奏的视频</small>
+              </div>
+              <label>
+                <span>任务标题</span>
+                <input
+                  name="title"
+                  type="text"
+                  placeholder="默认使用产品 Markdown 文件名"
+                />
+              </label>
+              <FileField
+                name="video"
+                label="参考视频"
+                accept="video/mp4,video/quicktime,video/webm"
+                icon={<Video size={16} />}
+              />
+            </div>
+            <div className="settings-panel">
+              <div className="section-heading compact-heading">
+                <span>3. 生成设置</span>
+                <small>不确定时保持默认</small>
+              </div>
+              <label>
+                <span>行业</span>
+                <select name="industry" defaultValue="auto">
+                  <option value="auto">自动判断</option>
+                  <option value="game">游戏</option>
+                  <option value="ecommerce">电商</option>
+                </select>
+              </label>
+              <label>
+                <span>裂变数量</span>
+                <input
+                  name="fission_count"
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={fissionCount}
+                  onChange={handleFissionCountChange}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="section-heading">
+              <span>4. 补充要求</span>
+              <small>可写平台、风格、禁用表达或目标人群</small>
+            </div>
+            <label className="requirement-field">
+              <span>补充要求</span>
+              <textarea
+                name="requirement"
+                rows="4"
+                value={requirementDraft}
+                onChange={(event) => setRequirementDraft(event.target.value)}
+                placeholder="例如：面向 TikTok，节奏更快，避免夸大功效。"
+              />
+            </label>
+          </div>
+
+          <FissionDirectionPicker count={fissionCount} />
+
+          <div className="submit-row">
+            <div>
+              <span>生成流程</span>
+              <small>视频理解 / 复刻脚本 / {fissionCount} 条裂变脚本</small>
+            </div>
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={props.isCreating}
+            >
+              {props.isCreating ? (
+                <Loader2 className="spin" size={16} />
+              ) : (
+                <Play size={16} />
+              )}
+              <span>{props.isCreating ? "创建中" : "生成"}</span>
+            </button>
+          </div>
+        </form>
+        {props.error ? <div className="error-banner">{props.error}</div> : null}
+      </section>
+
+      <section className="result-pane">
+        <ResultHeader {...props} job={props.selectedJob} />
+        <div className="tabs">
+          {resultTabs.map(([key, label]) => (
+            <button
+              key={key}
+              className={props.activeTab === key ? "active" : ""}
+              type="button"
+              onClick={() => props.onTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <ResultContent
+          job={props.selectedJob}
+          content={props.visibleContent}
+          activeTab={props.activeTab}
+          isGeneratingVideoPrompts={props.isGeneratingVideoPrompts}
+        />
+      </section>
+    </>
+  );
+}
+
+function useDismissDetailsOnOutsidePointer() {
+  const detailsRef = useRef(null);
+  useEffect(() => {
+    function dismiss(event) {
+      const details = detailsRef.current;
+      if (details?.open && !details.contains(event.target)) details.open = false;
+    }
+    document.addEventListener("pointerdown", dismiss, true);
+    return () => document.removeEventListener("pointerdown", dismiss, true);
+  }, []);
+  return detailsRef;
+}
+
+function ProductConnectorImage({ productId }) {
+  const [imageId, setImageId] = useState("");
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageId("");
+    setImageFailed(false);
+    if (!productId) return undefined;
+    let active = true;
+    listProductAssets(productId)
+      .then((items) => {
+        if (!active) return;
+        const images = (Array.isArray(items) ? items : []).filter((asset) => asset.kind === "image");
+        setImageId(images.at(-1)?.id || "");
+      })
+      .catch(() => { if (active) setImageId(""); });
+    return () => { active = false; };
+  }, [productId]);
+
+  return imageId && !imageFailed
+    ? <img className="product-connector-image" src={`/api/assets/${imageId}/file`} alt="" onError={() => setImageFailed(true)} />
+    : <Package size={18} aria-hidden="true" />;
+}
+
+function ChatWorkspace({
+  thread,
+  optimisticMessages,
+  typingMessage,
+  citations,
+  agentSteps,
+  isThinking,
+  draft,
+  products,
+  skills,
+  selectedProductId,
+  sourceSpace,
+  spaces,
+  onAssignSpace,
+  historyCollapsed,
+  isSending,
+  error,
+  attachment,
+  videos,
+  isCreatingVideo,
+  onDraft,
+  onAttachment,
+  onProduct,
+  onCreateSkill,
+  onCreateVideo,
+  videoModel,
+  onRetryVideo,
+  onHistoryToggle,
+  onEditSpace,
+  onSend,
+  videoSkillRequest,
+  onVideoSkillHandled,
+}) {
+  const messages = optimisticMessages || thread?.messages || [];
+  const messagesRef = useRef(null);
+  const [chatAssets, setChatAssets] = useState([]);
+  useEffect(() => {
+    if (!selectedProductId) { setChatAssets([]); return undefined; }
+    let active = true;
+    listProductAssets(selectedProductId).then((items) => {
+      if (active) setChatAssets(Array.isArray(items) ? items : []);
+    }).catch(() => { if (active) setChatAssets([]); });
+    return () => { active = false; };
+  }, [selectedProductId, messages.length]);
+  const productConnectorRef = useDismissDetailsOnOutsidePointer();
+  const [showSkillMenu, setShowSkillMenu] = useState(false);
+  const skillSlashRef = useRef(-1);
+  const [showVideoComposer, setShowVideoComposer] = useState(false);
+  const [spaceChoice, setSpaceChoice] = useState("");
+  const [assigningSpace, setAssigningSpace] = useState(false);
+  const [videoPrompt, setVideoPrompt] = useState("");
+  const [videoContext, setVideoContext] = useState("");
+  useEffect(() => { setShowVideoComposer(false); }, [thread?.conversation?.id]);
+  const latestVideoAnswer = visibleAssistantContent(lastAssistantMessage(messages)?.content || "");
+  const latestScriptAnswer = [...messages].reverse().find((message) =>
+    message.role === "assistant" && hasVideoScript(visibleAssistantContent(message.content || "")),
+  );
+  function openVideoSkill(sourceDraft = draft) {
+    const request = parseVideoSkillRequest(sourceDraft);
+    const script = visibleAssistantContent(latestScriptAnswer?.content || "");
+    setVideoPrompt(request ? request.prompt || script || latestVideoAnswer : sourceDraft.trim() || script || latestVideoAnswer);
+    setVideoContext(videoDraftContext(messages));
+    setShowSkillMenu(false); setShowVideoComposer(true);
+  }
+  useEffect(() => {
+    if (videoSkillRequest) {
+      setVideoPrompt(videoSkillRequest.prompt); setVideoContext(videoSkillRequest.context || videoDraftContext(messages)); setShowSkillMenu(false); setShowVideoComposer(true); onVideoSkillHandled();
+    }
+  }, [videoSkillRequest, onVideoSkillHandled]);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const recognitionRef = useRef(null);
+  const voicePermissionPending = useRef(false);
+  const voiceMounted = useRef(true);
+  const voiceBaseRef = useRef("");
+  const SpeechRecognition =
+    typeof window !== "undefined"
+      ? window.SpeechRecognition || window.webkitSpeechRecognition
+      : null;
+
+  useEffect(
+    () => { voiceMounted.current = true; return () => {
+      voiceMounted.current = false;
+      if (recognitionRef.current) recognitionRef.current.abort();
+    }; },
+    [],
+  );
+
+  async function toggleVoiceInput() {
+    if (!SpeechRecognition) {
+      setVoiceError("当前浏览器不支持语音输入，请使用最新版 Chrome 或 Edge。");
+      return;
+    }
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+    if (voicePermissionPending.current || recognitionRef.current) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVoiceError("麦克风需要安全连接，请使用 HTTPS 或 localhost 打开页面。");
+      return;
+    }
+    voicePermissionPending.current = true;
+    setVoiceError("请在 Chrome 的麦克风授权提示中选择允许。");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+      if (!voiceMounted.current) return;
+      setVoiceError("");
+    } catch (err) {
+      if (voiceMounted.current) setVoiceError(err.name === "NotAllowedError"
+        ? "麦克风访问被阻止。请点击 Chrome 地址栏左侧的网站设置，将麦克风改为允许；若仍被阻止，请在系统隐私设置中允许 Chrome 使用麦克风。"
+        : err.name === "NotFoundError" ? "未检测到麦克风，请连接后重试。" : "无法使用麦克风，请检查设备是否被其他应用占用后重试。");
+      return;
+    } finally { voicePermissionPending.current = false; }
+    const recognition = new SpeechRecognition();
+    recognition.lang = "zh-CN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    voiceBaseRef.current = draft.trimEnd();
+    recognition.onstart = () => {
+      setIsListening(true);
+      setVoiceError("");
+    };
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let index = 0; index < event.results.length; index += 1)
+        transcript += event.results[index][0].transcript;
+      const base = voiceBaseRef.current;
+      onDraft(`${base}${base && transcript ? " " : ""}${transcript}`);
+    };
+    recognition.onerror = (event) => {
+      const messages = {
+        "not-allowed": "语音识别被阻止，请检查 Chrome 网站麦克风权限和系统对 Chrome 的麦克风授权后重试。",
+        "audio-capture": "未检测到可用麦克风。",
+        "no-speech": "没有识别到语音，请重试。",
+        network: "语音识别网络不可用，请稍后重试。",
+      };
+      setVoiceError(messages[event.error] || "语音识别失败，请重试。");
+      setIsListening(false);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    try { recognition.start(); } catch {
+      recognitionRef.current = null;
+      setIsListening(false);
+      setVoiceError("语音识别未能启动，请重试。");
+    }
+  }
+  let lastAssistantIndex = -1;
+  messages.forEach((message, index) => {
+    if (message.role === "assistant") lastAssistantIndex = index;
+  });
+  const showCompletedTrace = Boolean(
+    agentSteps?.length && !isThinking && !typingMessage,
+  );
+  const conversationId = thread?.conversation?.id || "";
+  const conversationVideos = conversationId
+    ? (Array.isArray(videos) ? videos : []).filter(
+        (item) => item.conversation_id === conversationId,
+      )
+    : [];
+
+  useEffect(() => {
+    const messageList = messagesRef.current;
+    if (messageList) messageList.scrollTop = messageList.scrollHeight;
+  }, [
+    messages.length,
+    conversationVideos.length,
+    showVideoComposer,
+    videoPrompt,
+    isThinking,
+    typingMessage?.visible,
+  ]);
+
+  function handleSkill(skill) {
+    const position = skillSlashRef.current;
+    skillSlashRef.current = -1;
+    if (skill.name === "generate-video") {
+      const cleanedDraft = position >= 0 && draft[position] === "/" ? replaceSkillSlash(draft, position, "").trim() : draft;
+      if (cleanedDraft !== draft) onDraft(cleanedDraft);
+      openVideoSkill(cleanedDraft); return;
+    }
+    onDraft(replaceSkillSlash(draft, position, skill.invocation_prompt || `调用 ${skill.name} skill。`));
+    setShowSkillMenu(false);
+  }
+
+  return (
+    <section className="chat-pane chat-pane-inline-context">
+      <div className="chat-space-bar">
+        <div className="chat-space-identity"><FolderKanban size={17} /><div><strong>{sourceSpace ? `创意空间 · ${sourceSpace.title}` : "未加入创意空间"}</strong><small>{sourceSpace ? `${marketingLabel(marketingGoals, sourceSpace.marketing_goal)} · ${marketingLabel(marketingStages, sourceSpace.goal_stage)}${sourceSpace.summary ? ` · ${sourceSpace.summary}` : ""}` : "加入空间后，后续对话会带入该空间的创作目的和长期要求"}</small></div></div>
+        {!sourceSpace && spaces.length ? <div className="chat-space-assign"><select aria-label="选择要加入的创意空间" value={spaceChoice} disabled={assigningSpace || isSending} onChange={(event) => setSpaceChoice(event.target.value)}><option value="">选择创意空间</option>{spaces.map((space) => <option key={space.id} value={space.id}>{space.title}</option>)}</select><button className="secondary-button" type="button" disabled={!spaceChoice || assigningSpace || isSending} onClick={async () => { setAssigningSpace(true); try { await onAssignSpace(spaceChoice); setSpaceChoice(""); } catch {} finally { setAssigningSpace(false); } }}>{assigningSpace ? "加入中" : "加入空间"}</button></div> : null}
+      </div>
+      <div className="chat-messages" ref={messagesRef}>
+        {messages.length ||
+        conversationVideos.length ||
+        isThinking ||
+        typingMessage ? (
+          <>
+            {citations?.length ? <CitationPanel citations={citations} /> : null}
+            {chatTimeline(messages, conversationVideos).map((entry) => {
+              if (entry.type === "video") return <ChatVideoResults key={`video-${entry.item.id}`} videos={[entry.item]} onRetry={onRetryVideo} />;
+              const message = entry.item;
+              const index = entry.messageIndex;
+              const persistedSteps =
+                thread?.agent_traces?.[message.id] || [];
+              const traceSteps = persistedSteps.length
+                ? persistedSteps
+                : showCompletedTrace && index === lastAssistantIndex
+                  ? agentSteps
+                  : [];
+              return (
+                <Fragment key={message.id}>
+                  {message.role === "assistant" && traceSteps.length ? (
+                    <AgentExecutionTrace steps={traceSteps} />
+                  ) : null}
+                  <ChatMessageBubble message={message} assets={chatAssets} />
+                </Fragment>
+              );
+            })}
+            {isThinking || typingMessage ? (
+              <AgentExecutionTrace
+                steps={agentSteps}
+                isRunning={isThinking}
+                hasProduct={Boolean(selectedProductId)}
+                hasAttachment={Boolean(attachment)}
+              />
+            ) : null}
+            {typingMessage ? (
+              <ChatMessageBubble
+                message={{ ...typingMessage, content: typingMessage.visible }}
+                isTyping
+              />
+            ) : null}
+          </>
+        ) : (
+          <ChatTaskStarter onSelect={onDraft} />
+        )}
+        {showVideoComposer && <VideoComposerPanel key={`${videoPrompt}:${videoContext}`} inline productId={selectedProductId} conversationId={conversationId} spaceId={sourceSpace?.id || thread?.conversation?.space_id || ""} draft={videoPrompt} context={videoContext} model={videoModel} onCreate={onCreateVideo} isCreating={isCreatingVideo} error={error} onClose={() => setShowVideoComposer(false)} />}
+      </div>
+      <form className="chat-form" onSubmit={(event) => { if (productConnectorRef.current) productConnectorRef.current.open = false; onSend(event); }}>
+        {error ? <div className="error-banner">{error}</div> : null}
+        {showSkillMenu ? (
+          <SkillCommandMenu
+            skills={skills || []}
+            onSelect={handleSkill}
+            onCreate={onCreateSkill}
+            onClose={() => setShowSkillMenu(false)}
+          />
+        ) : null}
+        {attachment ? (
+          <AttachmentPreview
+            attachment={attachment}
+            onRemove={() => onAttachment(null)}
+          />
+        ) : null}
+        <textarea
+          value={draft}
+          onChange={(event) => {
+            onDraft(event.target.value);
+            const position = insertedSkillSlash(event);
+            if (position >= 0) { skillSlashRef.current = position; setShowSkillMenu(true); }
+          }}
+          rows="3"
+          placeholder="发消息或创建任务… / 使用技能，添加素材"
+        />
+        <div className="chat-composer-toolbar">
+          <div className="composer-tools">
+            <div className="composer-input-group" role="group" aria-label="输入与素材">
+            <button
+              className={`composer-tool voice-input ${isListening ? "active listening" : ""}`}
+              type="button"
+              onClick={toggleVoiceInput}
+              title={isListening ? "停止语音输入" : "语音输入"}
+              aria-label={isListening ? "停止语音输入" : "开始语音输入"}
+              aria-pressed={isListening}
+            >
+              {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+              <span>{isListening ? "正在听…" : "语音"}</span>
+            </button>
+            <label
+              className={`composer-tool composer-connector ${attachment ? "active" : ""}`}
+              title="添加图片或视频素材"
+              role="button"
+              tabIndex={0}
+              aria-label="添加图片或视频素材"
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.querySelector("input")?.click(); } }}
+            >
+              <Upload size={15} />
+              <span>{attachment ? "已添加素材" : "素材"}</span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+                onChange={(event) =>
+                  onAttachment(event.target.files?.[0] || null)
+                }
+              />
+            </label>
+            </div>
+            <div className="composer-assist-group" role="group" aria-label="创作辅助">
+            <details ref={productConnectorRef} className="product-connector" onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+              <summary className={`composer-tool ${selectedProductId || sourceSpace ? "active" : ""}`} aria-label="产品连接器" title={sourceSpace ? `创意空间：${sourceSpace.title}` : selectedProductId ? `已连接：${products.find(product => product.id === selectedProductId)?.title || "产品资料"}` : "连接产品资料"}>
+                <ProductConnectorImage productId={selectedProductId || sourceSpace?.product_id} />
+                {(selectedProductId || sourceSpace) && <span className="product-connector-dot" />}
+              </summary>
+              <div className="product-connector-popover">
+                <strong>连接产品资料</strong>
+                {!sourceSpace && <ProductChoices products={products} selectedId={selectedProductId} onSelect={onProduct} />}
+                {sourceSpace && <div className="space-connector-context">
+                  <strong>创意空间 · {sourceSpace.title}</strong>
+                  <span>{marketingLabel(marketingGoals, sourceSpace.marketing_goal)} · {marketingLabel(marketingStages, sourceSpace.goal_stage)}</span>
+                  {sourceSpace.summary && <p>{sourceSpace.summary}</p>}
+                  {sourceSpace.agent_brief && <p>长期要求：{sourceSpace.agent_brief}</p>}
+                  <small>以上设定会加入每一轮对话上下文</small>
+                  <button type="button" onClick={onEditSpace}>回空间修改</button>
+                </div>}
+              </div>
+            </details>
+            <button
+              className={`composer-tool ${showSkillMenu ? "active" : ""}`}
+              type="button"
+              aria-expanded={showSkillMenu}
+              onClick={() => { skillSlashRef.current = -1; setShowSkillMenu((value) => !value); }}
+            >
+              <Sparkles size={16} />
+              <span>技能</span>
+              <ChevronRight size={14} />
+            </button>
+            </div>
+          </div>
+          <div className="composer-output-group" role="group" aria-label="生成与发送">
+            <button
+              className={`composer-tool composer-video-tool ${showVideoComposer ? "active" : ""}`}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={showVideoComposer}
+              onClick={() => {
+                openVideoSkill();
+              }}
+            >
+              <Video size={16} />
+              <span>生成视频</span>
+              <ChevronRight size={14} />
+            </button>
+          <button
+            className="composer-send"
+            type="submit"
+            disabled={isSending || (!draft.trim() && !attachment)}
+            aria-label={isSending ? "发送中" : "发送"}
+          >
+            {isSending ? (
+              <Loader2 className="spin" size={18} />
+            ) : (
+              <Send size={18} />
+            )}
+          </button>
+          </div>
+        </div>
+        {voiceError ? (
+          <div className="voice-input-message" role="status">
+            {voiceError}
+          </div>
+        ) : isListening ? (
+          <div className="voice-input-message listening" role="status">
+            <span />
+            正在识别，点击“正在听”即可停止
+          </div>
+        ) : null}
+      </form>
+    </section>
+  );
+}
+
+const videoStatusText = {
+  pending: "准备生成",
+  submitting: "正在提交",
+  submitted: "已提交",
+  running: "生成中",
+  completed: "已完成",
+  failed: "生成失败",
+};
+
+function videoFailureMessage(message) {
+  if (!message) return "";
+  if (/workspace endpoint is invalid/i.test(message)) {
+    return "百炼工作空间地址无效。请使用业务空间管理中的 ID；API Key 列表里的数字是密钥 ID。";
+  }
+  if (/free quota exhausted|use free tier only|AllocationQuota\.FreeTierOnly/i.test(message)) {
+    return "视频模型免费额度已用尽，供应商账号仍设为“仅使用免费额度”。请先在阿里云百炼控制台检查额度；若决定付费使用，确认余额和计费方式后关闭“免费额度用完即停”，再重试。";
+  }
+  return message;
+}
+
+function ReferencePromptEditor({ value, assets, selectedIds, onSelect, onChange }) {
+  const editor = useRef(null);
+  const [menu, setMenu] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const images = assets.filter((asset) => asset.kind === "image");
+  useEffect(() => {
+    if (editor.current && !editor.current.dataset.ready) {
+      editor.current.textContent = value || "";
+      editor.current.dataset.ready = "true";
+    }
+  }, [value]);
+  function readPrompt() {
+    const root = editor.current;
+    const read = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
+      if (node.dataset?.assetLabel) return `@${node.dataset.assetLabel}`;
+      if (node.tagName === "BR") return "\n";
+      const text = Array.from(node.childNodes).map(read).join("");
+      return node !== root && node.tagName === "DIV" ? `${text}\n` : text;
+    };
+    return root ? read(root).replace(/\n{3,}/g, "\n\n").trim() : "";
+  }
+  function handleInput() {
+    onChange(readPrompt());
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !editor.current?.contains(selection.anchorNode)) return setMenu(false);
+    const before = selection.getRangeAt(0).cloneRange();
+    before.selectNodeContents(editor.current);
+    before.setEnd(selection.anchorNode, selection.anchorOffset);
+    setMenu(/@$/.test(before.toString()));
+  }
+  function insert(asset) {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+      range.setStart(range.startContainer, range.startOffset - 1);
+      range.deleteContents();
+    }
+    const token = document.createElement("button");
+    token.type = "button";
+    token.className = "prompt-reference-token";
+    token.contentEditable = "false";
+    token.dataset.assetLabel = asset.original_name;
+    token.title = `预览 ${asset.original_name}`;
+    const image = document.createElement("img"); image.src = `/api/assets/${asset.id}/file`; image.alt = "";
+    const label = document.createElement("span"); label.textContent = asset.original_name;
+    token.append(image, label);
+    token.addEventListener("click", () => setPreview(asset));
+    range.insertNode(token);
+    const spacer = document.createTextNode(" "); token.after(spacer);
+    const next = document.createRange(); next.setStartAfter(spacer); next.collapse(true);
+    selection.removeAllRanges(); selection.addRange(next);
+    onSelect(asset.id); setMenu(false);
+    requestAnimationFrame(() => onChange(readPrompt()));
+  }
+  return <div className="reference-prompt-editor">
+    <div ref={editor} className="reference-prompt-input" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder="描述人物、场景、动作、镜头运动、声音与画面风格…输入 @ 引用参考图" onInput={handleInput} onKeyDown={(event) => {if (event.key === "Escape") setMenu(false);}} />
+    {menu && <div className="reference-mention-menu" role="listbox"><strong>选择参考图</strong>{images.length ? images.map((asset) => <button type="button" key={asset.id} onMouseDown={(event) => {event.preventDefault(); insert(asset);}}><img src={`/api/assets/${asset.id}/file`} alt=""/><span>{asset.original_name}<small>{selectedIds.includes(asset.id) ? "已选参考图" : "点击引用"}</small></span></button>) : <p>当前产品资料没有图片</p>}</div>}
+    {preview && <div className="prompt-reference-preview"><button type="button" aria-label="关闭预览" onClick={() => setPreview(null)}><X size={15}/></button><img src={`/api/assets/${preview.id}/file`} alt={preview.original_name}/><small>{preview.original_name}</small></div>}
+  </div>;
+}
+
+function VideoComposerPanel({
+  inline = false,
+  productId,
+  conversationId,
+  spaceId,
+  draft,
+  context,
+  model: initialModel,
+  onCreate,
+  isCreating,
+  error,
+  onClose,
+}) {
+  const modalRef = useRef(null);
+  useEffect(() => { if (!inline) modalRef.current?.showModal(); }, [inline]);
+  const [prepared] = useState(() => prepareVideoDraft(draft || "", context || ""));
+  const [editing, setEditing] = useState(!inline || !prepared.prompt || (hasVideoScript(draft) && !/(?:^|\n)\s*(?:#{1,6}\s*)?视频生成提示词\s*[:：\n]/.test(draft)));
+  const [mode, setMode] = useState("text");
+  const [assets, setAssets] = useState([]);
+  const [sourceAssetIds, setSourceAssetIds] = useState([]);
+  const [prompt, setPrompt] = useState(prepared.prompt);
+  const [resolution, setResolution] = useState("default");
+  const [duration, setDuration] = useState(Math.max(4, Math.min(15,prepared.duration)));
+  const [ratio, setRatio] = useState(prepared.ratio);
+  const [soundEnabled, setSoundEnabled] = useState(prepared.soundEnabled);
+  const [model,setModel]=useState(["seedance-2.0","seedance-2.0-mini","minimax-h3","minimax-h3-max"].includes(initialModel)?initialModel:"seedance-2.0");
+  const [catalog,setCatalog]=useState([]);const [quoteError,setQuoteError]=useState("");
+  const hasVideoReference=sourceAssetIds.some(id=>assets.find(a=>a.id===id)?.kind==="video");
+  useEffect(()=>{let active=true;setCatalog([]);getVideoModels(duration,resolution,hasVideoReference).then(data=>{if(active){setCatalog(data);setQuoteError("")}}).catch(e=>{if(active)setQuoteError(e.message)});return()=>{active=false}},[duration,resolution,hasVideoReference]);
+  const selectedModel=catalog.find(x=>x.model.id===model);
+  const submitting = useRef(false);
+
+  useEffect(() => {
+    if (!productId) {
+      setAssets([]);
+      setSourceAssetIds([]);
+      return undefined;
+    }
+    let active = true;
+    listProductAssets(productId)
+      .then((items) => {
+        if (!active) return;
+        const available = (Array.isArray(items) ? items : []).filter(
+            (item) =>
+              ["image","artwork","reference"].includes(item.kind) ||
+              (item.kind === "video" &&
+                /\.(mp4|mov)$/i.test(item.original_name)),
+          );
+        available.forEach(item=>{if(["artwork","reference"].includes(item.kind))item.kind="image"});
+        setAssets(available);
+        const draftIDs = videoReferenceIDs(draft);
+        const contextIDs = /参考(?:图|片|视频|素材)|图\s*\d|视频\s*\d/.test(draft) ? videoReferenceIDs(context) : [];
+        const wantsVideo = /参考视频|视频参考|视频\s*\d/.test(draft);
+        const contextMatch = contextIDs.map((id) => available.find((asset) => asset.id === id)).filter((asset) => asset && asset.kind === (wantsVideo ? "video" : "image")).slice(-1);
+        const referenced = draftIDs.length ? draftIDs.map((id) => available.find((asset) => asset.id === id)).filter(Boolean) : contextMatch;
+        const images = referenced.filter((asset) => asset.kind === "image").slice(0, 9);
+        const videos = referenced.filter((asset) => asset.kind === "video").slice(0, 9);
+        const chosen = images.length ? images : videos;
+        if (chosen.length) {
+          setMode(chosen[0].kind);
+          setSourceAssetIds(chosen.map((asset) => asset.id));
+        }
+      })
+      .catch(() => {
+        if (active) setAssets([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [productId]);
+
+  async function generate() {
+    if (submitting.current || !canGenerate) return;
+    submitting.current = true;
+    try {
+    const selectedAssets = sourceAssetIds
+      .map((id) => assets.find((asset) => asset.id === id))
+      .filter(Boolean);
+    const references = selectedAssets.map(
+      (asset, index) =>
+        `${mode === "first_last" ? (index===0?"首帧":"尾帧") : mode === "first_frame" ? "首帧" : asset.kind === "image" ? "图片" : "视频"}${["first_frame","first_last"].includes(mode) ? "" : selectedAssets.slice(0,index+1).filter(x=>x.kind===asset.kind).length}（${asset.original_name}）`,
+    );
+    const referencedPrompt = references.length
+      ? `参考素材对应关系：${references.join("、")}。\n${prompt.trim()}`
+      : prompt.trim();
+    const created = await onCreate({
+      product_id: productId,
+      conversation_id: conversationId,
+      space_id: spaceId,
+      source_asset_id: mode === "text" ? "" : sourceAssetIds[0] || "",
+      source_asset_ids: mode === "text" ? [] : sourceAssetIds,
+      mode,
+      prompt: referencedPrompt,
+      negative_prompt:
+        "广告感过强，棚拍感，过度磨皮，文字乱码，水印，品牌标识变形，产品外观不一致",
+      model,
+      price_version: selectedModel?.version || 0,
+      resolution,
+      ratio,
+      duration: Number(duration),
+      sound_enabled: soundEnabled,
+    });
+    if (created) onClose();
+    } finally { submitting.current = false; }
+  }
+
+  const visibleAssets = assets.filter((asset) => (mode === "reference" ? ["image","video"].includes(asset.kind) : asset.kind === (["first_frame","first_last"].includes(mode) ? "image" : mode)));
+  const selectionLimit = mode === "first_frame" ? 1 : mode === "first_last" ? 2 : 9;
+  const canGenerate =
+    prompt.trim() && (mode === "text" || sourceAssetIds.length) && !isCreating && selectedModel?.available && (mode!=="first_last" || sourceAssetIds.length===2);
+
+  function toggleAsset(assetId) {
+    setSourceAssetIds((current) => {
+      if (current.includes(assetId)) {
+        return current.filter((id) => id !== assetId);
+      }
+      if (current.length >= selectionLimit) return current;
+      return [...current, assetId];
+    });
+  }
+  function selectMentionAsset(assetId) {
+    setMode("image");
+    setSourceAssetIds((current) => current.includes(assetId) ? current : current.length < 9 ? [...current, assetId] : current);
+  }
+  const content = (
+    <section className="video-composer-panel">
+      <div className="video-composer-head">
+        <div>
+          <strong id="video-composer-title">{inline ? "视频草稿 · 待确认" : "生成视频"}</strong>
+          {!inline && <small>写下想要的画面和动作</small>}
+        </div>
+        <button type="button" onClick={onClose} aria-label="关闭视频设置">
+          <X size={17} />
+        </button>
+      </div>
+      {inline && !editing && <div className="video-draft-summary">
+        <p>{prompt || "还没有画面描述，请先编辑提示词。"}</p>
+        <div className="video-draft-meta"><span>{duration} 秒</span><span>{ratio}</span><span>{resolution}</span><span>{soundEnabled ? "有声" : "无声"}</span><span>{mode === "text" ? "纯文本" : `${sourceAssetIds.length} 个参考素材`}</span></div>
+      </div>}
+      <div className="video-composer-body" hidden={!editing}>
+      <div className="ugc-mode-switch">
+        <button
+          type="button"
+          className={mode === "text" ? "active" : ""}
+          onClick={() => {
+            setMode("text");
+            setSourceAssetIds([]);
+          }}
+        >
+          纯文本
+        </button>
+        <button
+          type="button"
+          disabled={!model.startsWith("seedance-")}
+          className={mode === "first_frame" ? "active" : ""}
+          onClick={() => { setMode("first_frame"); setSourceAssetIds([]); }}
+        >
+          首帧生成
+        </button>
+        <button
+          type="button"
+          className={mode === "image" ? "active" : ""}
+          onClick={() => {
+            setMode("image");
+            setSourceAssetIds([]);
+          }}
+        >
+          图片参考
+        </button>
+        <button
+          type="button"
+          className={mode === "video" ? "active" : ""}
+          onClick={() => {
+            setMode("video");
+            setSourceAssetIds([]);
+          }}
+        >
+          视频参考
+        </button>
+        <button type="button" disabled={!model.startsWith("seedance-")} className={mode==="first_last"?"active":""} onClick={()=>{setMode("first_last");setSourceAssetIds([])}}>首尾帧</button>
+        <button type="button" className={mode==="reference"?"active":""} onClick={()=>{setMode("reference");setSourceAssetIds([])}}>组合参考</button>
+      </div>
+      {mode !== "text" ? (
+        <div className="ugc-reference compact">
+          <span>
+            从当前产品资料选择{mode === "reference" ? "图片或视频" : mode === "video" ? "视频" : "图片"} · 已选 {sourceAssetIds.length}/{selectionLimit}
+          </span>
+          {visibleAssets.length ? (
+            <div className="ugc-asset-strip">
+              {visibleAssets.map((asset) => (
+                <button
+                  type="button"
+                  className={sourceAssetIds.includes(asset.id) ? "active" : ""}
+                  onClick={() => toggleAsset(asset.id)}
+                  key={asset.id}
+                >
+                  {sourceAssetIds.includes(asset.id) ? (
+                    <b className="asset-reference-index">
+                      {mode === "first_frame" ? "首帧" : mode === "image" ? "图" : "视频"}
+                      {sourceAssetIds.indexOf(asset.id) + 1}
+                    </b>
+                  ) : null}
+                  {asset.kind === "video" ? (
+                    <video
+                      src={`/api/assets/${asset.id}/file`}
+                      muted
+                      preload="metadata"
+                    />
+                  ) : (
+                    <img
+                      src={`/api/assets/${asset.id}/file`}
+                      alt={asset.original_name}
+                    />
+                  )}
+                  <small>{asset.original_name}</small>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p>
+              {productId
+                ? `当前产品资料还没有可用${mode === "reference" ? "图片或视频" : mode === "video" ? "视频" : "图片"}。`
+                : "请先选择产品资料。"}
+            </p>
+          )}
+        </div>
+      ) : null}
+      <label className="video-prompt">
+        <span>提示词</span>
+        <ReferencePromptEditor value={prompt} assets={assets} selectedIds={sourceAssetIds} onSelect={selectMentionAsset} onChange={setPrompt}/>
+        {sourceAssetIds.length ? (
+          <small className="video-reference-help">
+            可在提示词中直接使用“{mode === "first_frame" ? "首帧" : mode === "image" ? "图1、图2" : "视频1、视频2"}”；提交时会自动附上素材对应关系。
+          </small>
+        ) : null}
+      </label>
+      <div className="video-composer-options">
+        <label><span>视频模型</span><select aria-label="视频模型" value={model} onChange={e=>{setModel(e.target.value);if(!e.target.value.startsWith("seedance-")&&["first_frame","first_last"].includes(mode)){setMode("image");setSourceAssetIds([])}}}>{(catalog.length?catalog.map(x=>x.model):[{id:"seedance-2.0",name:"Seedance 2.0"},{id:"seedance-2.0-mini",name:"Seedance 2.0 Mini"},{id:"minimax-h3",name:"MiniMax H3"},{id:"minimax-h3-max",name:"MiniMax H3 Max"}]).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+        <label>
+          <span>分辨率</span>
+          <select
+            aria-label="分辨率"
+            value={resolution}
+            onChange={(event) => setResolution(event.target.value)}
+          >
+            <option value="default">模型默认</option><option value="720p">720p（需供应商开放）</option><option value="1080p">1080p（需供应商开放）</option>
+          </select>
+        </label>
+        <label>
+          <span>时长</span>
+          <select
+            aria-label="时长"
+            value={duration}
+            onChange={(event) => setDuration(Number(event.target.value))}
+          >
+            {Array.from({length: 12}, (_, i) => i + 4).map((value) => (
+              <option value={value} key={value}>
+                {value} 秒
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>画幅</span>
+          <select
+            aria-label="画幅"
+            value={ratio}
+            onChange={(event) => setRatio(event.target.value)}
+          >
+            <option value="9:16">9:16 竖屏</option>
+            <option value="16:9">16:9 横屏</option>
+            <option value="1:1">1:1 方形</option>
+            <option value="4:3">4:3</option><option value="3:4">3:4</option><option value="21:9">21:9 宽屏</option>
+          </select>
+        </label>
+        <label className="video-sound">
+          <input
+            type="checkbox"
+            checked={soundEnabled}
+            onChange={(event) => setSoundEnabled(event.target.checked)}
+          />
+          <span>声音要求（通过提示词控制）</span>
+        </label>
+      </div>
+      </div>
+      <div className="video-composer-submit-area">
+      <p className="video-reference-help" role="status">{quoteError || (selectedModel ? (selectedModel.available ? (selectedModel.message || `${selectedModel.model.name} · ${duration} 秒 · ${selectedModel.points} 积分／次`) : selectedModel.message) : "正在获取视频报价…")}</p>
+      {error && <div className="error-banner" role="alert">{error}</div>}
+      <div className="video-composer-actions">
+        {inline ? <button type="button" className="video-draft-edit" aria-expanded={editing} onClick={() => setEditing(!editing)}>{editing ? "收起编辑" : "编辑提示词与参数"}</button> : <small>生成后可离开当前对话，任务会继续运行。</small>}
+        <button
+          className="primary-button"
+          type="button"
+          disabled={!canGenerate}
+          onClick={generate}
+        >
+          {isCreating ? (
+            <>
+              <Loader2 className="spin" size={15} />
+              提交中
+            </>
+          ) : (
+            <>
+              <Video size={15} />
+              {inline ? "确认并生成视频" : "生成"}
+            </>
+          )}
+        </button>
+      </div>
+      </div>
+    </section>
+  );
+  return inline ? <div className="chat-video-draft">{content}</div> : createPortal(<dialog ref={modalRef} className="video-composer-dialog" aria-labelledby="video-composer-title" onCancel={onClose}>{content}</dialog>, document.body);
+}
+
+function ChatVideoResults({ videos, onRetry }) {
+  return (
+    <section className="chat-video-results">
+      <div className="chat-video-results-title">
+        <Video size={16} />
+        <strong>视频结果</strong>
+      </div>
+      {videos.map((item) => (
+        <article className="chat-video-card" key={item.id}>
+          <div className="chat-video-preview">
+            {item.status === "completed" ? (
+              <video
+                src={`/api/videos/${item.id}/file`}
+                controls
+                preload="metadata"
+              />
+            ) : (
+              <div className={`ugc-video-state ${item.status}`}>
+                {["pending", "submitting", "submitted", "running"].includes(item.status) ? (
+                  <Loader2 className="spin" size={22} />
+                ) : (
+                  <Video size={22} />
+                )}
+                <strong>{videoStatusText[item.status] || item.status}</strong>
+                <small>
+                  {videoFailureMessage(item.error_message) ||
+                    (item.status === "running"
+                      ? "可继续对话，完成后自动显示"
+                      : `${item.duration} 秒 · ${item.resolution}`)}
+                </small>
+              </div>
+            )}
+          </div>
+          <div className="chat-video-meta">
+            <div>
+              <strong>{item.prompt}</strong>
+              <small>
+                {item.resolution} · {item.duration} 秒 ·{" "}
+                {item.sound_enabled ? "有声" : "无声"} ·{" "}
+                {formatTime(item.created_at)}
+              </small>
+            </div>
+            {item.status === "completed" ? (
+              <a
+                className="secondary-button"
+                href={`/api/videos/${item.id}/file`}
+                download={`ugc-${item.id}.mp4`}
+              >
+                下载
+              </a>
+            ) : item.status === "failed" ? (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onRetry(item.id)}
+              >
+                重试
+              </button>
+            ) : null}
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function AttachmentPreview({ attachment, onRemove }) {
+  const [previewURL, setPreviewURL] = useState("");
+  const isVideo = attachment?.type?.startsWith("video/");
+
+  useEffect(() => {
+    if (!attachment) return undefined;
+    const url = URL.createObjectURL(attachment);
+    setPreviewURL(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachment]);
+
+  return (
+    <div className="attachment-preview">
+      <div className="attachment-cover">
+        {previewURL ? (
+          isVideo ? (
+            <video
+              src={previewURL}
+              muted
+              playsInline
+              preload="metadata"
+              aria-label={attachment.name}
+            />
+          ) : (
+            <img src={previewURL} alt={attachment.name} />
+          )
+        ) : null}
+        {isVideo ? (
+          <span className="attachment-video-badge">
+            <Video size={13} />
+            视频
+          </span>
+        ) : null}
+      </div>
+      <div className="attachment-meta">
+        <strong>{attachment.name}</strong>
+        <small>{isVideo ? "视频素材" : "图片素材"}</small>
+      </div>
+      <button type="button" onClick={onRemove}>
+        移除
+      </button>
+    </div>
+  );
+}
+
+function AgentExecutionTrace({ steps = [], isRunning = false }) {
+  const [expanded, setExpanded] = useState(false);
+  const completedActions = steps.map((step) => ({
+    label: agentStepLabel(step),
+    detail: step.error ? "此步骤未完成" : step.reason || "",
+    status: step.status || "completed",
+    error: Boolean(step.error),
+  }));
+
+  useEffect(() => {
+    if (isRunning && steps.length > 0) setExpanded(true);
+  }, [isRunning, steps.length]);
+
+  const status = isRunning
+    ? "处理中"
+    : `已完成${completedActions.length > 1 ? ` · ${completedActions.length} 个步骤` : ""}`;
+
+  return (
+    <section
+      className={`agent-execution-trace ${isRunning ? "running" : "complete"}`}
+      aria-live="polite"
+    >
+      <button
+        className="agent-trace-toggle"
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+      >
+        <span>
+          {isRunning ? (
+            <Loader2 className="spin" size={15} />
+          ) : (
+            <CheckCircle2 size={15} />
+          )}
+          {status}
+        </span>
+        {completedActions.length ? (
+          <ChevronDown className={expanded ? "expanded" : ""} size={15} />
+        ) : null}
+      </button>
+      {expanded && completedActions.length ? (
+        <ol className="agent-trace-steps">
+          {completedActions.map((item, index) => {
+            const state = item.error || item.status === "error"
+              ? "error"
+              : item.status === "running"
+                ? "active"
+                : "done";
+            return (
+              <li className={state} key={`${item.label}-${index}`}>
+                <i />{" "}
+                <div>
+                  <strong>{item.label}</strong>
+                  {item.detail ? <small>{item.detail}</small> : null}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
+function agentStepLabel(step) {
+  if (step.kind === "model") return "判断下一步";
+  if (step.kind === "final") return "整理并校验结果";
+  return (
+    {
+      list_products: "检查可用产品资料",
+      retrieve_product_sections: "检索相关产品内容",
+      read_product_markdown: "读取产品完整资料",
+      call_skill: "调用专业创作技能",
+    }[step.tool] || "执行 Agent 工具"
+  );
+}
+
+function ChatTaskStarter({ onSelect }) {
+  return (
+    <section className="chat-starter chat-starter-minimal" aria-label="快捷创作任务">
+      <h3>想从哪里开始？</h3>
+      <div className="starter-list">
+        {chatQuickTasks.map((task) => (
+          <button
+            key={task.title}
+            type="button"
+            onClick={(event) => { onSelect(task.description); event.currentTarget.closest('.chat-pane')?.querySelector('.chat-form textarea')?.focus(); }}
+          >
+            {({"生成裂变方向": "找创意方向", "写产品 Markdown": "整理产品资料", "拆解并复刻素材": "拆解参考素材", "生成视频提示词": "写视频提示词"})[task.title] || task.title}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SkillCommandMenu({ skills, onSelect, onCreate, onClose }) {
+  const searchRef = useRef(null);
+  const mobilePickerRef = useRef(null);
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    (window.matchMedia("(max-width: 760px)").matches ? mobilePickerRef : searchRef).current?.focus();
+    return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, []);
+  useEffect(() => {
+    const escape = event => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('keydown', escape); };
+  }, [onClose]);
+  const [selectedSkill, setSelectedSkill] = useState(skills[0] || null);
+  const [skillQuery, setSkillQuery] = useState("");
+  const visibleSkills = skills.filter(skill => `${skill.title} ${skill.description} ${skill.category}`.toLowerCase().includes(skillQuery.trim().toLowerCase()));
+  const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [creatorPrompt, setCreatorPrompt] = useState("");
+  const [editingSkillId, setEditingSkillId] = useState("");
+  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
+  const [draft, setDraft] = useState({
+    name: "",
+    title: "",
+    description: "",
+    category: "自定义",
+    invocation_prompt: "",
+    content: "",
+  });
+
+  function updateDraft(key, value) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveSkill() {
+    setCreateError("");
+    setIsSaving(true);
+    try {
+      const skill = await onCreate(draft, editingSkillId);
+      setSelectedSkill(skill);
+      setIsCreating(false);
+      setEditingSkillId("");
+      setCreatorPrompt("");
+      setDraft({
+        name: "",
+        title: "",
+        description: "",
+        category: "自定义",
+        invocation_prompt: "",
+        content: "",
+      });
+    } catch (err) {
+      setCreateError(err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function startCreate() {
+    setCreateError("");
+    setEditingSkillId("");
+    setCreatorPrompt("");
+    setDraft({
+      name: "",
+      title: "",
+      description: "",
+      category: "自定义",
+      invocation_prompt: "",
+      content: "",
+    });
+    setIsCreating(true);
+  }
+
+  async function createFromPrompt() {
+    if (!creatorPrompt.trim()) return;
+    setCreateError("");
+    setIsGeneratingDraft(true);
+    try {
+      setDraft(await generateSkillDraft(creatorPrompt));
+    } catch (err) {
+      setCreateError(err.message);
+    } finally {
+      setIsGeneratingDraft(false);
+    }
+  }
+
+  function startEdit(skill) {
+    if (skill.source !== "custom") return;
+    setCreateError("");
+    setEditingSkillId(skill.id);
+    setCreatorPrompt("");
+    setDraft({
+      name: skill.name,
+      title: skill.title,
+      description: skill.description,
+      category: skill.category || "自定义",
+      invocation_prompt: skill.invocation_prompt || "",
+      content: skill.content || "",
+    });
+    setIsCreating(true);
+  }
+
+  return createPortal(
+    <div className="skill-command-overlay" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="skill-command-menu skill-command-compact" role="dialog" aria-modal="true" aria-label="技能浏览">
+      <div className="skill-browser-toolbar">
+        <label className="skill-mobile-picker">切换技能<select ref={mobilePickerRef} value={selectedSkill?.name || ""} onChange={e => {setSelectedSkill(skills.find(s => s.name === e.target.value));setIsCreating(false);}}>{skills.map(s => <option key={s.name} value={s.name}>{s.title}</option>)}</select></label>
+        <button type="button" onClick={startCreate}>新建</button><button type="button" onClick={onClose}>关闭</button>
+      </div>
+      <div className="skill-command-body">
+        <aside className="skill-navigation" id="skill-navigation" aria-label="技能目录">
+          <label className="skill-search"><Search size={15}/><input ref={searchRef} aria-label="搜索技能" placeholder="搜索技能" value={skillQuery} onChange={e => setSkillQuery(e.target.value)}/></label>
+        <div className="skill-command-list">
+          {visibleSkills.map((skill) => (
+            <button
+              className={
+                selectedSkill?.name === skill.name && !isCreating
+                  ? "active"
+                  : ""
+              }
+              key={skill.name}
+              aria-current={selectedSkill?.name === skill.name && !isCreating ? "true" : undefined}
+              title={skill.description}
+              type="button"
+              onClick={() => {
+                setSelectedSkill(skill);
+                setIsCreating(false);
+              }}
+            >
+              <span className="skill-command-icon">
+                <Sparkles size={17} />
+              </span>
+              <strong>{skill.title}</strong>
+              <em>{skill.category}</em>
+            </button>
+          ))}
+          {!visibleSkills.length && <p className="skill-search-empty">没有匹配的技能</p>}
+        </div>
+        <div className="skill-navigation-footer"><button type="button" className="skill-create-entry" onClick={startCreate}><Plus size={14}/>新建技能</button><button type="button" onClick={onClose}>关闭</button></div>
+        </aside>
+        {isCreating ? (
+          <div className="skill-create-panel">
+            <div className="skill-preview-heading">
+              <div>
+                <span>Skill Creator</span>
+                <strong>
+                  {editingSkillId ? "编辑自定义技能" : "创建自定义技能"}
+                </strong>
+              </div>
+            </div>
+            {!editingSkillId ? (
+              <div className="skill-creator-quick">
+                <label>
+                  <span>一句话描述你想要的技能</span>
+                  <textarea
+                    value={creatorPrompt}
+                    onChange={(event) => setCreatorPrompt(event.target.value)}
+                    placeholder="例如：检查短视频前三秒钩子，并给出三个可直接替换的方案"
+                  />
+                </label>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!creatorPrompt.trim() || isGeneratingDraft}
+                  onClick={createFromPrompt}
+                >
+                  {isGeneratingDraft ? (
+                    <Loader2 className="spin" size={15} />
+                  ) : (
+                    <Sparkles size={15} />
+                  )}
+                  {isGeneratingDraft ? "生成中" : "生成草稿"}
+                </button>
+              </div>
+            ) : null}
+            <label>
+              <span>名称</span>
+              <input
+                value={draft.title}
+                onChange={(event) => updateDraft("title", event.target.value)}
+                placeholder="例如：小红书标题优化"
+              />
+            </label>
+            <label>
+              <span>标识</span>
+              <input
+                value={draft.name}
+                onChange={(event) =>
+                  updateDraft(
+                    "name",
+                    event.target.value
+                      .toLowerCase()
+                      .replace(/[^a-z0-9-]/g, "-"),
+                  )
+                }
+                placeholder="xiaohongshu-title-review"
+              />
+              <small>小写字母、数字和连字符</small>
+            </label>
+            <label>
+              <span>描述</span>
+              <textarea
+                value={draft.description}
+                onChange={(event) =>
+                  updateDraft("description", event.target.value)
+                }
+                placeholder="说明它做什么，以及什么情况下应该使用。"
+              />
+            </label>
+            <label>
+              <span>分类</span>
+              <input
+                value={draft.category}
+                onChange={(event) =>
+                  updateDraft("category", event.target.value)
+                }
+              />
+            </label>
+            <label>
+              <span>调用提示</span>
+              <input
+                value={draft.invocation_prompt}
+                onChange={(event) =>
+                  updateDraft("invocation_prompt", event.target.value)
+                }
+                placeholder="可留空，由 Skill Creator 自动生成"
+              />
+            </label>
+            <label>
+              <span>正文</span>
+              <textarea
+                className="skill-content-editor"
+                value={draft.content}
+                onChange={(event) => updateDraft("content", event.target.value)}
+                placeholder={
+                  "# 工作流程\n\n1. 读取输入...\n2. 按规则处理...\n\n## 输出格式\n..."
+                }
+              />
+            </label>
+            {createError ? (
+              <div className="error-banner">{createError}</div>
+            ) : null}
+            <button
+              className="primary-button"
+              type="button"
+              disabled={
+                isSaving ||
+                !draft.name ||
+                !draft.title ||
+                !draft.description ||
+                !draft.content
+              }
+              onClick={saveSkill}
+            >
+              {isSaving ? "保存中" : editingSkillId ? "保存修改" : "创建并启用"}
+            </button>
+          </div>
+        ) : selectedSkill ? (
+          <div className="skill-preview-panel">
+            <div className="skill-preview-heading">
+              <div>
+                <span>
+                  {selectedSkill.source === "custom"
+                    ? "自定义 Skill"
+                    : "内置 Skill"}
+                </span>
+                <strong>{selectedSkill.title}</strong>
+              </div>
+              <em>{selectedSkill.category}</em>
+            </div>
+            <p className="skill-description">{selectedSkill.description !== selectedSkill.title ? selectedSkill.description : "查看下方流程与要求，确认后用于当前对话。"}</p>
+            <div className="skill-preview-content" key={selectedSkill.name}>
+              <details className="skill-technical-details"><summary>技能信息</summary><dl className="skill-metadata"><div><dt>标识</dt><dd>{selectedSkill.name}</dd></div></dl></details>
+              <MarkdownContent content={selectedSkill.content || "暂无正文"} />
+            </div>
+            <div className="skill-preview-actions">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => onSelect(selectedSkill)}
+              >
+                在对话中使用
+              </button>
+              {selectedSkill.source === "custom" ? (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => startEdit(selectedSkill)}
+                >
+                  编辑技能
+                </button>
+              ) : (
+                <span>系统预置技能，仅支持查看和使用</span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="skill-preview-empty">
+            还没有 Skill，可以创建一个。
+          </div>
+        )}
+      </div>
+    </section>
+    </div>,
+    document.body,
+  );
+}
+
+function AgentStepsPanel({ steps }) {
+  return (
+    <section className="agent-steps-panel">
+      <div className="section-heading">
+        <span>本轮 Agent 步骤</span>
+        <small>{steps.length} 步</small>
+      </div>
+      <div className="agent-step-list">
+        {steps.map((step) => (
+          <details
+            key={`${step.index}-${step.kind}-${step.tool || "final"}`}
+            className="agent-step-card"
+          >
+            <summary>
+              <span>{String(step.index).padStart(2, "0")}</span>
+              <strong>{step.kind === "tool" ? step.tool : "final"}</strong>
+              <small>
+                {step.reason ||
+                  (step.kind === "tool" ? "调用工具" : "最终回答")}
+              </small>
+            </summary>
+            {step.input ? (
+              <div>
+                <b>输入</b>
+                <pre>{pretty(step.input)}</pre>
+              </div>
+            ) : null}
+            {step.observation ? (
+              <div>
+                <b>{step.error ? "错误" : "观察"}</b>
+                <pre>{step.observation}</pre>
+              </div>
+            ) : null}
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CitationPanel({ citations }) {
+  return (
+    <details className="citation-panel">
+      <summary>参考了 {citations.length} 条产品资料</summary>
+      <div className="citation-list">
+        {citations.map((citation, index) => (
+          <article
+            key={`${citation.chunk_id || citation.chunk_index}-${index}`}
+            className="citation-card"
+          >
+            <div>
+              <strong>{citation.heading || "产品资料"}</strong>
+              <span>{citation.product_name}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function ChatMessageBubble({ message, assets = [], isTyping = false }) {
+  const content = displayChatMessageContent(message);
+  const attachments = message.attachments || [];
+  const visibleText = message.role === "user" && attachments.length ? content.replace(/\n\n附件：[\s\S]*$/, "").trim() : content;
+  const citedAssets = message.role === "assistant" ? videoReferenceIDs(visibleText).map((id) => assets.find((asset) => asset.id === id)).filter(Boolean) : [];
+  return (
+    <div className={`chat-message ${message.role} ${isTyping ? "typing" : ""}`}>
+      <span>{message.role === "assistant" ? "助手" : "用户"}</span>
+      {(visibleText || isTyping) && <p>
+        {visibleText}
+        {isTyping ? <b className="typing-cursor" /> : null}
+      </p>}
+      {citedAssets.length ? <div className="chat-cited-assets" aria-label="引用的产品素材">{citedAssets.map((asset) => <a key={asset.id} href={`/api/assets/${asset.id}/file`} target="_blank" rel="noopener noreferrer" className="chat-cited-asset" title={asset.original_name}>
+        {asset.kind === "video" ? <video src={`/api/assets/${asset.id}/file`} muted preload="metadata" playsInline /> : <img src={`/api/assets/${asset.id}/file`} alt={asset.original_name} />}
+        <span>{asset.original_name}</span>
+      </a>)}</div> : null}
+      {attachments.map((item, index) => <ChatAttachmentCard key={item.id || `local-${index}`} attachment={item} conversationId={message.conversation_id} />)}
+    </div>
+  );
+}
+
+function ChatAttachmentCard({ attachment, conversationId }) {
+  const [localURL, setLocalURL] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const dialogRef = useRef(null);
+  useEffect(() => {
+    if (!attachment.file) return undefined;
+    const url = URL.createObjectURL(attachment.file);
+    setLocalURL(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachment.file]);
+  useEffect(() => {
+    if (previewOpen) dialogRef.current?.showModal();
+  }, [previewOpen]);
+  const base = attachment.id && conversationId ? `/api/chats/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(attachment.id)}` : "";
+  const mediaURL = localURL || (base ? `${base}/file` : "");
+  const posterURL = base ? `${base}/poster` : "";
+  const isVideo = attachment.kind === "video";
+  return <>
+    <button className="chat-attachment-card" type="button" disabled={!mediaURL} onClick={() => setPreviewOpen(true)} aria-label={`预览${isVideo ? "视频" : "图片"} ${attachment.original_name}`}>
+      <span className="chat-attachment-cover">
+        {mediaURL ? isVideo ? <video src={mediaURL} poster={posterURL || undefined} preload="metadata" muted playsInline aria-hidden="true" /> : <img src={mediaURL} alt="" /> : <Video size={22} />}
+        {isVideo && <span className="chat-attachment-play"><Play size={20} fill="currentColor" /></span>}
+      </span>
+      <span className="chat-attachment-name">{attachment.original_name}</span>
+    </button>
+    {previewOpen && createPortal(<dialog ref={dialogRef} className="chat-attachment-dialog" onCancel={() => setPreviewOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setPreviewOpen(false); }} aria-label={`预览 ${attachment.original_name}`}>
+      <header><strong>{attachment.original_name}</strong><button type="button" onClick={() => setPreviewOpen(false)} aria-label="关闭预览"><X size={18} /></button></header>
+      <div className="chat-attachment-stage">{isVideo ? <video src={mediaURL} controls autoPlay playsInline /> : <DownloadableImage wrapperClassName="downloadable-stage-image" src={mediaURL} alt={attachment.original_name} filename={attachment.original_name} />}</div>
+    </dialog>, document.body)}
+  </>;
+}
+
+function displayChatMessageContent(message) {
+  let content = (message?.content || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/（当前已选产品 ID：[^）]+）/g, "")
+    .trim();
+  if (message?.role === "assistant") {
+    content = visibleAssistantContent(content);
+  }
+  if (
+    message?.role !== "user" ||
+    !["继续推进创作空间「", "继续推进创意空间「"].some((prefix) =>
+      content.startsWith(prefix),
+    )
+  )
+    return content;
+  return content.split("\n", 1)[0];
+}
+
+function FissionDirectionPicker({ count }) {
+  const rows = Array.from({ length: count }, (_, index) => index);
+  const [directions, setDirections] = useState(() =>
+    rows.map((index) => defaultFissionDirection(index)),
+  );
+
+  useEffect(() => {
+    setDirections((current) =>
+      rows.map((index) => current[index] || defaultFissionDirection(index)),
+    );
+  }, [count]);
+
+  function updateDirection(index, value) {
+    setDirections((current) => {
+      const next = [...current];
+      next[index] = value;
+      return next;
+    });
+  }
+
+  return (
+    <div className="direction-panel">
+      <div className="direction-heading">
+        <span>5. 裂变方向</span>
+        <small>每一行对应一条脚本，只使用这一行选择的 1 个裂变元素</small>
+      </div>
+      <div className="direction-list">
+        {rows.map((index) => (
+          <section key={index} className="direction-card-row">
+            <input
+              type="hidden"
+              name="fission_directions"
+              value={directions[index] || defaultFissionDirection(index)}
+            />
+            <div className="direction-card-title">
+              <span className="direction-index">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div>
+                <strong>第 {index + 1} 条裂变脚本</strong>
+                <small>
+                  {directions[index] || defaultFissionDirection(index)}
+                </small>
+              </div>
+            </div>
+            <div className="direction-option-board">
+              {fissionDirectionGroups.map((group) => (
+                <div key={group.layer} className="direction-option-group">
+                  <span>{group.layer}</span>
+                  <div>
+                    {group.items.map((item) => {
+                      const value = `${group.layer}-${item}`;
+                      const active =
+                        (directions[index] ||
+                          defaultFissionDirection(index)) === value;
+                      return (
+                        <button
+                          key={value}
+                          className={active ? "active" : ""}
+                          type="button"
+                          onClick={() => updateDirection(index, value)}
+                        >
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const homeIdeaPrompts = [
+  "为我的产品设计 3 个短视频开场钩子",
+  "分析一条参考视频，提炼可复用的创意结构",
+  "基于现有素材，规划一周的小红书内容",
+];
+
+function AgentStart({
+  products,
+  skills,
+  spaces,
+  suggestions,
+  isSending,
+  onSend,
+  onVideoSkill,
+  onCreateSkill,
+  onSpaces,
+  onToolbox,
+  onSuggestion,
+}) {
+  const [goal, setGoal] = useState("");
+  const [activeIdeaIndex, setActiveIdeaIndex] = useState(0);
+  const [productID, setProductID] = useState(products[0]?.id || "");
+  const [attachment, setAttachment] = useState(null);
+  const [showSkillMenu, setShowSkillMenu] = useState(false);
+  const skillSlashRef = useRef(-1);
+  const composerRef = useRef(null);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const recognitionRef = useRef(null);
+  const productConnectorRef = useDismissDetailsOnOutsidePointer();
+  const speechRecognition = typeof window !== "undefined" ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+  useEffect(() => () => recognitionRef.current?.abort(), []);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") setActiveIdeaIndex((index) => (index + 1) % homeIdeaPrompts.length);
+    }, 5500);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  function toggleVoiceInput() {
+    if (recognitionRef.current) { recognitionRef.current.stop(); return; }
+    if (!speechRecognition) { setVoiceError("当前浏览器不支持语音输入，请使用支持语音识别的浏览器。"); return; }
+    const recognition = new speechRecognition();
+    const base = goal.trimEnd();
+    recognition.lang = "zh-CN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onstart = () => { setIsListening(true); setVoiceError(""); };
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let index = 0; index < event.results.length; index += 1) transcript += event.results[index][0].transcript;
+      setGoal(`${base}${base && transcript ? " " : ""}${transcript}`);
+    };
+    recognition.onerror = () => { setVoiceError("语音识别失败，请检查麦克风权限后重试。"); setIsListening(false); };
+    recognition.onend = () => { setIsListening(false); recognitionRef.current = null; };
+    recognitionRef.current = recognition;
+    try { recognition.start(); } catch { recognitionRef.current = null; setVoiceError("语音识别未能启动，请重试。"); }
+  }
+
+  function handleSkill(skill) {
+    setShowSkillMenu(false);
+    const position = skillSlashRef.current;
+    skillSlashRef.current = -1;
+    if (skill.name === "generate-video") {
+      onVideoSkill(productID, position >= 0 && goal[position] === "/" ? replaceSkillSlash(goal, position, "").trim() : goal);
+      return;
+    }
+    setGoal(replaceSkillSlash(goal, position, skill.invocation_prompt || `调用 ${skill.name} skill。`));
+    composerRef.current?.querySelector("textarea")?.focus();
+  }
+  const safeSpaces = Array.isArray(spaces) ? spaces : [];
+  const featuredSkills = [...(skills || [])].sort((a, b) => Number(b.source === "custom") - Number(a.source === "custom")).slice(0, 4);
+  return (
+    <section className="agent-start">
+      <div className="agent-intro">
+        <span className="eyebrow">BriefOnce <small className="product-beta">Beta</small></span>
+        <h1>今天想完成什么？</h1>
+        <p>说出目标，助手会读取资料、规划步骤并执行。</p>
+        <button className="home-idea" type="button" onClick={() => { setGoal(homeIdeaPrompts[activeIdeaIndex]); composerRef.current?.querySelector("textarea")?.focus(); }}>
+          <span className="home-idea-icon"><Sparkles size={15} /></span>
+          <span className="home-idea-label">试试这样开始</span>
+          <span className="home-idea-text" key={activeIdeaIndex}>{homeIdeaPrompts[activeIdeaIndex]}</span>
+          <ChevronRight size={15} aria-hidden="true" />
+        </button>
+      </div>
+      <form ref={composerRef} className="chat-form home-chat-form" onSubmit={event => { event.preventDefault(); if (productConnectorRef.current) productConnectorRef.current.open = false; if ((goal.trim() || attachment) && !isSending) onSend(productID, goal, attachment); }}>
+        {showSkillMenu ? <SkillCommandMenu skills={skills || []} onSelect={handleSkill} onCreate={onCreateSkill} onClose={() => setShowSkillMenu(false)} /> : null}
+        {attachment ? <AttachmentPreview attachment={attachment} onRemove={() => setAttachment(null)} /> : null}
+        <textarea
+          rows="3"
+          value={goal}
+          onChange={(event) => {
+            setGoal(event.target.value);
+            const position = insertedSkillSlash(event);
+            if (position >= 0) { skillSlashRef.current = position; setShowSkillMenu(true); }
+          }}
+          placeholder="发消息或创建任务… / 使用技能，添加素材"
+        />
+        <div className="chat-composer-toolbar">
+          <div className="composer-tools">
+            <div className="composer-input-group" role="group" aria-label="输入与素材">
+              <button className={`composer-tool voice-input ${isListening ? "active listening" : ""}`} type="button" onClick={toggleVoiceInput} aria-label={isListening ? "停止语音输入" : "开始语音输入"} aria-pressed={isListening}>
+                {isListening ? <MicOff size={16} /> : <Mic size={16} />}<span>{isListening ? "正在听…" : "语音"}</span>
+              </button>
+              <label className={`composer-tool composer-connector ${attachment ? "active" : ""}`} title="添加图片或视频素材" role="button" tabIndex={0} aria-label="添加图片或视频素材" onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.querySelector("input")?.click(); } }}>
+                <Upload size={15} /><span>{attachment ? "已添加素材" : "素材"}</span>
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={event => setAttachment(event.target.files?.[0] || null)} />
+              </label>
+            </div>
+            <div className="composer-assist-group" role="group" aria-label="创作辅助">
+          <details ref={productConnectorRef} className="product-connector" onKeyDown={event => { if (event.key === "Escape") {event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus();} }}>
+            <summary className={`composer-tool ${productID ? "active" : ""}`} aria-label="产品连接器" title={productID ? `已连接：${products.find(product => product.id === productID)?.title || "产品资料"}` : "连接产品资料"}><ProductConnectorImage productId={productID} />{productID && <span className="product-connector-dot"/>}</summary>
+            <div className="product-connector-popover"><strong>连接产品资料</strong><ProductChoices products={products} selectedId={productID} onSelect={setProductID} /></div></details>
+              <button className={`composer-tool ${showSkillMenu ? "active" : ""}`} type="button" aria-expanded={showSkillMenu} onClick={() => { skillSlashRef.current = -1; setShowSkillMenu(value => !value); }}><Sparkles size={16} /><span>技能</span><ChevronRight size={14} /></button>
+            </div>
+          </div>
+          <div className="composer-output-group" role="group" aria-label="生成与发送">
+            <button className="composer-tool composer-video-tool" type="button" onClick={() => onVideoSkill(productID, goal)}><Video size={16} /><span>生成视频</span><ChevronRight size={14} /></button>
+          <button
+            className="composer-send"
+            type="submit"
+            aria-label={isSending ? "发送中" : "发送"}
+            disabled={(!goal.trim() && !attachment) || isSending}
+          >
+            {isSending ? <Loader2 className="spin" size={18}/> : <Send size={18}/>}
+          </button>
+          </div>
+        </div>
+        {voiceError ? <p className="voice-input-message">{voiceError}</p> : null}
+      </form>
+      <div className="agent-start-grid">
+        <section className="home-tools">
+          <div className="section-heading">
+            <span>常用工具</span>
+            <button className="home-skills-all" type="button" onClick={() => onToolbox(null)}>全部工具 <ChevronRight size={14} /></button>
+          </div>
+          <div className="home-tool-grid">
+            {[
+              { id: "extract", title: "视频素材提取", detail: "提取画面与镜头参考", Icon: ImagePlus },
+              { id: "interpret", title: "创意解读", detail: "拆解小红书素材的创意表达", Icon: Sparkles },
+            ].map(({ id, title, detail, Icon }) => (
+              <button className="home-tool-card" type="button" key={id} onClick={() => onToolbox(id)}>
+                <span className="home-tool-icon"><Icon size={19} strokeWidth={1.8} /></span>
+                <span className="home-tool-copy"><strong>{title}</strong><small>{detail}</small></span>
+                <ChevronRight size={15} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        </section>
+        <section className="home-skills">
+          <div className="section-heading">
+            <span>我的 Skill</span>
+            <button className="home-skills-all" type="button" onClick={() => { skillSlashRef.current = -1; setShowSkillMenu(true); composerRef.current?.querySelector("textarea")?.focus(); }}>查看全部 <ChevronRight size={14} /></button>
+          </div>
+          {featuredSkills.length ? <div className="home-skill-grid">{featuredSkills.map((skill) => {
+            const description = skill.description?.trim();
+            const shortSummaries = { "裂变策略": "一份素材，多种拍法", "生成视频": "脚本生成视频", "开头钩子复刻": "借鉴结构，重写开头", "素材分析": "拆解图片与视频" };
+            const detail = shortSummaries[skill.title?.trim()] || (description && description !== skill.title?.trim() ? description : skill.category || "点击使用");
+            return <button className="home-skill-row" type="button" key={skill.id || skill.name} onClick={() => handleSkill(skill)}>
+              <span><strong>{skill.title}</strong><small>{detail}</small></span>
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>;
+          })}</div> : <p className="home-skills-empty">暂无 Skill。点击“查看全部”创建一个。</p>}
+        </section>
+        <section className="home-recent-spaces">
+          <div className="section-heading">
+            <span>最近空间</span>
+            <button className="mini-button" type="button" onClick={onSpaces}>
+              查看全部
+            </button>
+          </div>
+          <div className="home-recent-grid">
+            {safeSpaces.length ? (
+              safeSpaces.slice(0, 3).map((space) => (
+                <button className="home-recent-card" type="button" key={space.id} onClick={onSpaces}>
+                  <span className="home-recent-card-icon"><FolderKanban size={18} /></span>
+                  <span className="home-recent-card-copy">
+                    <strong>{space.title}</strong>
+                    <small>{space.summary || "继续创作"}</small>
+                  </span>
+                  <ChevronRight size={16} aria-hidden="true" />
+                </button>
+              ))
+            ) : (
+              <button className="home-recent-card" type="button" onClick={onSpaces}>
+                <span className="home-recent-card-icon"><FolderKanban size={18} /></span>
+                <span className="home-recent-card-copy"><strong>创建第一个空间</strong><small>把目标和历史放在一起</small></span>
+                <ChevronRight size={16} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function HistoryWorkspace({
+  jobs,
+  chats,
+  videos,
+  products,
+  onJob,
+  onChat,
+  onVideo,
+}) {
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState("all");
+  const safeJobs = Array.isArray(jobs) ? jobs : [],
+    safeChats = Array.isArray(chats) ? chats : [],
+    safeVideos = Array.isArray(videos) ? videos : [],
+    safeProducts = Array.isArray(products) ? products : [];
+  const items = [
+    ...safeJobs.map((job) => ({
+      id: job.id,
+      kind: "job",
+      title: job.title,
+      detail: `${statusLabel(job.status)} · ${safeProducts.find((p) => p.md_name === job.product_md_name)?.title || job.product_md_name}`,
+      at: job.updated_at,
+    })),
+    ...safeChats.map((chat) => ({
+      id: chat.id,
+      kind: "chat",
+      title: chat.title,
+      detail: chat.summary || "和 BriefOnce 的对话",
+      at: chat.updated_at,
+    })),
+    ...safeVideos.map((video) => ({
+      id: video.id,
+      kind: "video",
+      video,
+      conversationId: video.conversation_id || "",
+      title: video.prompt || "UGC 视频",
+      detail: `${videoStatusText[video.status] || video.status} · ${video.resolution} · ${video.duration} 秒 · ${video.sound_enabled ? "有声" : "无声"}`,
+      at: video.updated_at || video.created_at,
+    })),
+  ]
+    .filter(
+      (item) =>
+        (kind === "all" || item.kind === kind) &&
+        `${item.title} ${item.detail}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+    )
+    .sort((a, b) => new Date(b.at) - new Date(a.at));
+  return (
+    <section className="history-workspace">
+      <span className="eyebrow">过去的工作都在这里</span>
+      <h1>继续，不必重新开始</h1>
+      <p>对话、执行任务和视频结果统一保存。</p>
+      <div className="history-tools">
+        <label>
+          <Search size={15} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索标题或产品"
+          />
+        </label>
+        <div>
+          {[
+            ["all", "全部"],
+            ["job", "执行任务"],
+            ["chat", "对话"],
+            ["video", "视频结果"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              className={kind === key ? "active" : ""}
+              onClick={() => setKind(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {items.length && kind === "video" ? (
+        <div className="history-video-grid">
+          {items.map((item) => (
+            <HistoryVideoCard
+              key={item.id}
+              video={item.video}
+              onConversation={() => onVideo(item.id, item.conversationId)}
+            />
+          ))}
+        </div>
+      ) : items.length ? (
+        <div className="history-list">
+          {items.map((item) => (
+            <button
+              key={`${item.kind}-${item.id}`}
+              onClick={() =>
+                item.kind === "job"
+                  ? onJob(item.id)
+                  : item.kind === "chat"
+                    ? onChat(item.id)
+                    : onVideo(item.id, item.conversationId)
+              }
+            >
+              <span>
+                {item.kind === "job" ? (
+                  <Bot size={16} />
+                ) : item.kind === "video" ? (
+                  <Video size={16} />
+                ) : (
+                  <MessageSquare size={16} />
+                )}
+              </span>
+              <div>
+                <strong>{item.title}</strong>
+                <small>{item.detail}</small>
+              </div>
+              <time>{formatTime(item.at)}</time>
+              <ChevronRight size={16} />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text="还没有历史记录" />
+      )}
+    </section>
+  );
+}
+
+function HistoryVideoCard({ video, onConversation }) {
+  const [expanded, setExpanded] = useState(false);
+  const completed = video.status === "completed";
+  const failed = video.status === "failed";
+  const estimatedCost = failed ? 0 : Number(video.estimated_cost_cny || 0);
+  return (
+    <article className="history-video-card">
+      <header>
+        <span className={`status-pill ${statusTone(video.status)}`}>
+          {videoStatusText[video.status] || video.status}
+        </span>
+        <strong className="history-video-cost">
+          预估费用 ¥{estimatedCost.toFixed(2)}
+        </strong>
+      </header>
+      <div className="history-video-player">
+        {completed ? (
+          <video src={`/api/videos/${video.id}/file`} controls preload="metadata" />
+        ) : (
+          <div className={`ugc-video-state ${video.status}`}>
+            {failed ? <Video size={24} /> : <Loader2 className="spin" size={24} />}
+            <strong>{videoStatusText[video.status] || video.status}</strong>
+            <small>{videoFailureMessage(video.error_message) || "完成后可在这里直接预览"}</small>
+          </div>
+        )}
+      </div>
+      <section className="history-video-prompt">
+        <span>生成提示词</span>
+        <p className={expanded ? "expanded" : ""}>{video.prompt}</p>
+        <button type="button" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "收起详情" : "查看详情"}
+          <ChevronDown className={expanded ? "expanded" : ""} size={14} />
+        </button>
+      </section>
+      <dl className="history-video-params">
+        <div><dt>模型</dt><dd>{video.model}</dd></div>
+        <div><dt>分辨率</dt><dd>{video.resolution}</dd></div>
+        <div><dt>画幅</dt><dd>{video.ratio}</dd></div>
+        <div><dt>时长</dt><dd>{video.duration} 秒</dd></div>
+        <div><dt>声音</dt><dd>{video.sound_enabled ? "开启" : "关闭"}</dd></div>
+        <div><dt>参考素材</dt><dd>{video.mode === "text" ? "无" : video.mode === "video" ? "视频" : "图片"}</dd></div>
+      </dl>
+      <footer>
+        <small>费用按公开原价估算，优惠、免费额度及参考视频输入费用以服务商账单为准。</small>
+        {video.conversation_id ? (
+          <button className="secondary-button" type="button" onClick={onConversation}>
+            查看完整对话 <ChevronRight size={14} />
+          </button>
+        ) : null}
+      </footer>
+    </article>
+  );
+}
+
+function SpacesWorkspace({
+  spaces,
+  products,
+  videos,
+  onConversation,
+  suggestions,
+  isCreating,
+  isSending,
+  error,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onStart,
+  onSuggestion,
+}) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [selectedSpaceId, setSelectedSpaceId] = useState("");
+  const [spaceVideos, setSpaceVideos] = useState([]);
+  const [selectedVideoId, setSelectedVideoId] = useState("");
+  const [videosLoading, setVideosLoading] = useState(false);
+  const [videosError, setVideosError] = useState("");
+  const [productAssets, setProductAssets] = useState([]);
+  const [assetsLoading, setAssetsLoading] = useState(false);
+  const [assetsError, setAssetsError] = useState("");
+  const selectedSpace = spaces.find((space) => space.id === selectedSpaceId);
+  const selectedVideo = spaceVideos.find((video) => video.id === selectedVideoId);
+  const weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - (weekStart.getDay() + 6) % 7);
+  const weeklyMaterialCounts = (Array.isArray(videos) ? videos : []).reduce((counts, video) => {
+    if (video.status === "completed" && video.space_id) {
+      const completedAt = new Date(video.updated_at || video.created_at);
+      if (completedAt >= weekStart) counts[video.space_id] = (counts[video.space_id] || 0) + 1;
+    }
+    return counts;
+  }, {});
+  useEffect(() => {
+    if (!selectedSpace) return;
+    let active = true;
+    setVideosLoading(true);
+    setVideosError("");
+    setSpaceVideos([]);
+    setSelectedVideoId("");
+    listSpaceVideos(selectedSpace.id)
+      .then((items) => { if (active) setSpaceVideos(Array.isArray(items) ? items : []); })
+      .catch((err) => { if (active) setVideosError(err.message); })
+      .finally(() => { if (active) setVideosLoading(false); });
+    return () => { active = false; };
+  }, [selectedSpace?.id]);
+  useEffect(() => {
+    setProductAssets([]);
+    setAssetsError("");
+    if (!selectedSpace?.product_id) {
+      setAssetsLoading(false);
+      return;
+    }
+    let active = true;
+    setAssetsLoading(true);
+    listProductAssets(selectedSpace.product_id)
+      .then((items) => { if (active) setProductAssets(Array.isArray(items) ? items : []); })
+      .catch((err) => { if (active) setAssetsError(err.message); })
+      .finally(() => { if (active) setAssetsLoading(false); });
+    return () => { active = false; };
+  }, [selectedSpace?.product_id, selectedSpace?.id]);
+  async function submit(event) {
+    const created = await onCreate(event);
+    if (created) setShowCreate(false);
+  }
+  return (
+    <section className="spaces-workspace">
+      {selectedSpace ? <>
+        <button className="space-detail-back" type="button" onClick={() => { setSelectedSpaceId(""); setSelectedVideoId(""); }}><ChevronLeft size={16} />返回创意空间</button>
+        <header className="space-detail-head"><div><span className="eyebrow">创意空间</span><h1>{selectedSpace.title}</h1><p>{selectedSpace.summary || "持续创作与视频成果"}</p></div><button className="primary-button" type="button" onClick={() => onStart(selectedSpace)}>继续创作</button></header>
+        {selectedVideo ? <div className="space-video-detail">
+          <button className="space-detail-back" type="button" onClick={() => setSelectedVideoId("")}><ChevronLeft size={16} />全部视频</button>
+          <video controls autoPlay src={`/api/videos/${selectedVideo.id}/file`} />
+          <div className="space-video-detail-copy"><span className="eyebrow">生成提示词</span><p>{selectedVideo.prompt}</p>{selectedVideo.negative_prompt ? <><span className="eyebrow">负面提示词</span><p>{selectedVideo.negative_prompt}</p></> : null}</div>
+          <SpaceVideoMeta video={selectedVideo} />
+          {selectedVideo.conversation_id ? <button className="secondary-button" type="button" onClick={() => onConversation(selectedVideo.id, selectedVideo.conversation_id)}>进入生成该视频的对话 <ChevronRight size={16} /></button> : <p className="space-video-note">这条视频没有关联的生成对话。</p>}
+        </div> : <>
+          <section className="space-linked-assets" aria-label="关联产品素材">
+            <div className="space-video-heading"><h2>关联产品素材</h2><span>{assetsLoading ? "加载中" : `${productAssets.length} 个`}</span></div>
+            <p>来自关联的产品资料，可供多个创意空间共用。</p>
+            {assetsError ? <p role="alert" className="error-banner">素材加载失败：{assetsError}</p> : productAssets.length ? <div className="space-linked-assets-grid">{productAssets.map((asset) => <figure key={asset.id}><span className="space-linked-asset-thumb">{asset.kind === "video" ? <video src={`/api/assets/${asset.id}/file`} muted preload="metadata" playsInline /> : <img src={`/api/assets/${asset.id}/file`} alt="" />}</span><figcaption title={asset.original_name}>{asset.original_name}</figcaption></figure>)}</div> : !assetsLoading ? <p>暂无关联产品素材。</p> : null}
+          </section>
+          <div className="space-video-heading"><h2>已生成视频</h2><span>{spaceVideos.length} 个</span></div>
+          {videosLoading ? <p role="status">正在加载视频…</p> : videosError ? <p role="alert" className="error-banner">{videosError}</p> : spaceVideos.length ? <div className="space-video-grid">{spaceVideos.map((video) => <button className="space-video-tile" key={video.id} type="button" onClick={() => setSelectedVideoId(video.id)} aria-label={`查看 ${new Date(video.updated_at || video.created_at).toLocaleDateString("zh-CN")} 生成的视频及提示词`}><span className="space-video-thumb"><video src={`/api/videos/${video.id}/file`} preload="metadata" muted playsInline /><span><Play size={18} fill="currentColor" /></span></span><strong>{video.prompt || "生成视频"}</strong><SpaceVideoMeta video={video} compact /></button>)}</div> : <div className="space-video-empty"><Video size={28} /><strong>这个空间还没有成功生成的视频</strong><p>在此空间的对话中生成视频后，成片会显示在这里。</p><button className="secondary-button" type="button" onClick={() => onStart(selectedSpace)}>继续创作</button></div>}
+        </>}
+      </> : <>
+      <div className="spaces-head">
+        <div>
+          <span className="eyebrow">长期创作</span>
+          <h1>创意空间</h1>
+          <p>集中管理长期目标、产品资料和后续创作。</p>
+        </div>
+        <button
+          className={showCreate ? "secondary-button" : "primary-button"}
+          type="button"
+          onClick={() => setShowCreate((value) => !value)}
+        >
+          {showCreate ? <X size={16} /> : <Plus size={16} />}{" "}
+          {showCreate ? "收起" : "新建空间"}
+        </button>
+      </div>
+      {showCreate ? (
+        <section className="space-create">
+          <form onSubmit={submit}>
+            <div className="space-create-fields">
+              <input name="title" placeholder="空间名称" required />
+              <select name="product_id" defaultValue="">
+                <option value="">暂不选择产品资料</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.title}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="marketing_goal"
+                defaultValue="conversion"
+                aria-label="广告创作目标"
+              >
+                {marketingGoals.map(([id, label, description]) => (
+                  <option key={id} value={id}>
+                    {label} · {description}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="goal_stage"
+                defaultValue="action"
+                aria-label="营销阶段"
+              >
+                {marketingStages.map(([id, label, description]) => (
+                  <option key={id} value={id}>
+                    {label} · {description}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                name="summary"
+                placeholder="这个空间要持续完成什么？"
+                required
+              />
+              <textarea
+                name="agent_brief"
+                placeholder="受众、风格、渠道或合规限制（可选）"
+              />
+            </div>
+            <div className="space-create-actions">
+              <small>创作目标会持续约束后续内容，修改不会影响历史记录。</small>
+              <button className="primary-button" disabled={isCreating}>
+                {isCreating ? "创建中" : "创建空间"}
+              </button>
+            </div>
+          </form>
+          {error ? <div className="error-banner">{error}</div> : null}
+        </section>
+      ) : null}
+      <section className="spaces-list">
+        {spaces.length ? (
+          spaces.map((space) => (
+            <SpaceCard
+              key={space.id}
+              space={space}
+              products={products}
+              weeklyMaterialCount={weeklyMaterialCounts[space.id] || 0}
+              isSending={isSending}
+              suggestion={suggestions?.find(
+                (item) => item.space_id === space.id,
+              )}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              onStart={onStart}
+              onOpen={() => setSelectedSpaceId(space.id)}
+              onSuggestion={onSuggestion}
+            />
+          ))
+        ) : (
+          <EmptyState text="还没有空间。点击右上角新建。" />
+        )}
+      </section>
+      </>}
+    </section>
+  );
+}
+
+function SpaceVideoMeta({ video, compact = false }) {
+  return <div className={`space-video-meta ${compact ? "compact" : ""}`}><time dateTime={video.updated_at || video.created_at}>{new Date(video.updated_at || video.created_at).toLocaleString("zh-CN")}</time><span>{video.model}</span><span>{video.resolution} · {video.ratio} · {video.duration} 秒</span><span>{video.sound_enabled ? "有声" : "无声"}</span></div>;
+}
+
+function IntelligenceWorkspace({ spaces, onCreateTask }) {
+  const [spaceId, setSpaceId] = useState(spaces[0]?.id || "");
+  const [data, setData] = useState({
+    connections: [],
+    signals: [],
+    memories: [],
+    monitors: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const activeSpace = spaces.find((space) => space.id === spaceId);
+  const load = async (target = spaceId) => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      setData(await getIntelligence(target));
+    } catch (err) {
+      setLoadError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load(spaceId);
+  }, [spaceId]);
+  async function demo() {
+    setBusy("demo");
+    setLoadError("");
+    try {
+      setData(await seedIntelligenceDemo(spaceId));
+    } catch (err) {
+      setLoadError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function remember(signal) {
+    if (!spaceId) return;
+    setBusy(signal.id);
+    try {
+      await promoteIntelligenceSignal(signal.id, spaceId);
+      await load(spaceId);
+    } catch (err) {
+      setLoadError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function saveMemory(id, input) {
+    setBusy(id);
+    setLoadError("");
+    try {
+      await updateCreativeMemory(id, input);
+      await load(spaceId);
+      return true;
+    } catch (err) {
+      setLoadError(err.message);
+      return false;
+    } finally {
+      setBusy("");
+    }
+  }
+  async function removeMemory(id) {
+    setBusy(id);
+    setLoadError("");
+    try {
+      await deleteCreativeMemory(id);
+      await load(spaceId);
+      return true;
+    } catch (err) {
+      setLoadError(err.message);
+      return false;
+    } finally {
+      setBusy("");
+    }
+  }
+  async function addMonitor(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy("monitor");
+    try {
+      await createCompetitorMonitor({
+        space_id: spaceId,
+        name: String(form.get("name") || ""),
+        platform: String(form.get("platform") || "xiaohongshu"),
+        account_url: String(form.get("account_url") || ""),
+        keywords: String(form.get("keywords") || ""),
+        source_type: "demo",
+        schedule: "manual",
+      });
+      event.currentTarget.reset();
+      await load(spaceId);
+    } catch (err) {
+      setLoadError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function scanMonitor(monitor) {
+    setBusy(monitor.id);
+    try {
+      await scanCompetitorMonitor(monitor.id);
+      await load(spaceId);
+    } catch (err) {
+      setLoadError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+  const labels = {
+    market_opportunity: "市场机会",
+    winning_creative: "优胜信号",
+    fatigue: "疲劳预警",
+    audience_voice: "用户声音",
+  };
+  return (
+    <section className="intelligence-workspace">
+      <header className="intelligence-head">
+        <div>
+          <span className="eyebrow">演示版 · 创意证据</span>
+          <h1>创意雷达</h1>
+          <p>先用示例信号练习：挑选创意方向，发起素材实验，或保存到空间记忆。</p>
+        </div>
+        <div className="intelligence-actions">
+          <select value={spaceId} onChange={(e) => setSpaceId(e.target.value)}>
+            <option value="">暂不绑定空间</option>
+            {spaces.map((space) => (
+              <option key={space.id} value={space.id}>
+                {space.title}
+              </option>
+            ))}
+          </select>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={busy === "demo"}
+            onClick={demo}
+          >
+            {busy === "demo" ? (
+              <Loader2 className="spin" size={16} />
+            ) : (
+              <Play size={16} />
+            )}
+            {data.signals.length ? "重新载入演示数据" : "开始体验：载入演示数据"}
+          </button>
+        </div>
+      </header>
+      <div className="intelligence-guide">
+        <strong>怎么使用</strong>
+        <ol>
+          <li>选择上方的创意空间，点击“载入演示数据”。</li>
+          <li>阅读“最新信号”，点击“去对话设计实验”会把信号带入该空间的对话草稿，确认后再发送。</li>
+          <li>有用的结论可点“保存到空间记忆”，供之后的空间对话参考。</li>
+        </ol>
+        <p>目前信号和竞品扫描结果都是演示内容，不会抓取账号或广告平台的实时数据。</p>
+      </div>
+      <div className="connector-strip">
+        <div>
+          <Radar size={18} />
+          <span>
+            <strong>当前数据来源</strong>
+            <small>
+              仅提供演示数据；文件导入和真实平台连接尚未开放。
+            </small>
+          </span>
+        </div>
+        {data.connections.map((item) => (
+          <div className="connector-card" key={item.id}>
+            <span className="status-dot" />
+            <span>
+              <strong>{item.name}</strong>
+              <small>
+                {item.status === "connected" ? "演示数据已载入" : item.status} ·{" "}
+                {item.last_synced_at
+                  ? formatTime(item.last_synced_at)
+                  : "未同步"}
+              </small>
+            </span>
+          </div>
+        ))}
+      </div>
+      <details className="competitor-monitor-panel" open={data.monitors?.length > 0 ? true : undefined}>
+        <summary>竞品监控演示 <span>可选 · 添加名称或关键词，生成模拟扫描结果</span></summary>
+        <div className="competitor-monitor-content">
+        <div className="section-heading">
+          <span>设置演示监控</span>
+          <small>输入的账号链接仅作演示记录，不会访问该账号</small>
+        </div>
+        <form onSubmit={addMonitor}>
+          <input name="name" placeholder="竞品名称" required />
+          <select name="platform" defaultValue="xiaohongshu">
+            <option value="xiaohongshu">小红书</option>
+            <option value="douyin">抖音</option>
+            <option value="tiktok">TikTok</option>
+            <option value="meta">Meta</option>
+            <option value="other">其他平台</option>
+          </select>
+          <input
+            name="account_url"
+            type="url"
+            placeholder="竞品账号或广告库链接（可选）"
+          />
+          <input name="keywords" placeholder="品类、品牌、卖点关键词" />
+          <button className="secondary-button" disabled={busy === "monitor"}>
+            {busy === "monitor" ? "添加中" : "添加监控"}
+          </button>
+        </form>
+        {data.monitors?.length ? (
+          <div className="monitor-list">
+            {data.monitors.map((monitor) => (
+              <article key={monitor.id}>
+                <div>
+                  <strong>{monitor.name}</strong>
+                  <small>
+                    {monitor.platform} · {monitor.keywords || "未设置关键词"}
+                  </small>
+                </div>
+                <span>
+                  {monitor.last_scanned_at
+                    ? `上次扫描 ${formatTime(monitor.last_scanned_at)}`
+                    : "尚未扫描"}
+                </span>
+                <button
+                  className="mini-button"
+                  type="button"
+                  disabled={busy === monitor.id}
+                  onClick={() => scanMonitor(monitor)}
+                >
+                  {busy === monitor.id ? "扫描中" : "演示扫描"}
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="monitor-empty">
+            尚未添加竞品演示监控。
+          </p>
+        )}
+        </div>
+      </details>
+      {loadError ? <div className="error-banner">{loadError}</div> : null}
+      {loading ? (
+        <div className="intelligence-empty">
+          <Loader2 className="spin" />
+          <span>正在读取创意证据</span>
+        </div>
+      ) : data.signals.length ? (
+        <div className="intelligence-layout">
+          <section>
+            <div className="section-heading">
+              <span>最新信号</span>
+              <small>以下为示例信号，请勿作为真实市场证据</small>
+            </div>
+            <div className="signal-grid">
+              {data.signals.map((signal) => (
+                <article key={signal.id}>
+                  <div>
+                    <span className={`signal-kind ${signal.signal_type}`}>
+                      {labels[signal.signal_type] || signal.signal_type}
+                    </span>
+                    <span className="confidence">
+                      置信度 {Math.round(signal.confidence * 100)}%
+                    </span>
+                  </div>
+                  <h3>{signal.title}</h3>
+                  <p>{signal.summary}</p>
+                  <footer>
+                    <button
+                      className="mini-button"
+                      type="button"
+                      disabled={
+                        !spaceId ||
+                        busy === signal.id ||
+                        data.memories.some((m) => m.signal_id === signal.id)
+                      }
+                      onClick={() => remember(signal)}
+                    >
+                      {data.memories.some((m) => m.signal_id === signal.id)
+                        ? "已保存到空间记忆"
+                        : "保存到空间记忆"}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={!activeSpace}
+                      onClick={() => onCreateTask(activeSpace, signal)}
+                    >
+                      去对话设计实验
+                    </button>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </section>
+          <aside>
+            <div className="section-heading">
+              <span>长期创意记忆</span>
+              <small>保存后供该空间之后的对话参考</small>
+            </div>
+            {data.memories.length ? (
+              data.memories.map((memory) => (
+                <CreativeMemoryCard
+                  memory={memory}
+                  busy={busy === memory.id}
+                  onSave={saveMemory}
+                  onDelete={removeMemory}
+                  key={memory.id}
+                />
+              ))
+            ) : (
+              <div className="memory-empty">
+                选择一条信号并保存，之后该空间的对话会参考它。
+              </div>
+            )}
+          </aside>
+        </div>
+      ) : (
+        <div className="intelligence-empty">
+          <Radar size={30} />
+          <strong>还没有演示信号</strong>
+          <span>
+            选择空间并点击“开始体验：载入演示数据”，即可查看示例信号。
+          </span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CreativeMemoryCard({ memory, busy, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [title, setTitle] = useState(memory.title);
+  const [finding, setFinding] = useState(memory.finding);
+  const [confidence, setConfidence] = useState(
+    Math.round(memory.confidence * 100),
+  );
+  async function save(event) {
+    event.preventDefault();
+    if (
+      await onSave(memory.id, {
+        title,
+        finding,
+        confidence: Number(confidence) / 100,
+      })
+    )
+      setEditing(false);
+  }
+  if (editing)
+    return (
+      <form className="memory-card memory-editor" onSubmit={save}>
+        <label>
+          <span>标题</span>
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            required
+          />
+        </label>
+        <label>
+          <span>结论</span>
+          <textarea
+            value={finding}
+            onChange={(event) => setFinding(event.target.value)}
+            required
+          />
+        </label>
+        <label>
+          <span>置信度</span>
+          <div className="memory-confidence-input">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={confidence}
+              onChange={(event) => setConfidence(event.target.value)}
+            />
+            <output>{confidence}%</output>
+          </div>
+        </label>
+        <div className="memory-card-actions">
+          <button
+            className="mini-button"
+            type="button"
+            onClick={() => {
+              setTitle(memory.title);
+              setFinding(memory.finding);
+              setConfidence(Math.round(memory.confidence * 100));
+              setEditing(false);
+            }}
+          >
+            取消
+          </button>
+          <button className="primary-button" disabled={busy}>
+            保存
+          </button>
+        </div>
+      </form>
+    );
+  return (
+    <article className="memory-card">
+      <CheckCircle2 size={16} />
+      <div className="memory-card-copy">
+        <strong>{memory.title}</strong>
+        <p>{memory.finding}</p>
+        <small>
+          置信度 {Math.round(memory.confidence * 100)}% ·{" "}
+          {formatTime(memory.last_verified_at)}
+        </small>
+      </div>
+      <div className="memory-card-menu">
+        {confirmingDelete ? (
+          <>
+            <span>确认删除？</span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDelete(memory.id)}
+            >
+              删除
+            </button>
+            <button type="button" onClick={() => setConfirmingDelete(false)}>
+              取消
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              title="编辑记忆"
+              aria-label={`编辑 ${memory.title}`}
+              onClick={() => setEditing(true)}
+            >
+              <FileText size={14} />
+            </button>
+            <button
+              type="button"
+              title="删除记忆"
+              aria-label={`删除 ${memory.title}`}
+              onClick={() => setConfirmingDelete(true)}
+            >
+              <Trash2 size={14} />
+            </button>
+          </>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function SpaceCard({
+  space,
+  products,
+  weeklyMaterialCount,
+  isSending,
+  suggestion,
+  onUpdate,
+  onDelete,
+  onStart,
+  onOpen,
+  onSuggestion,
+}) {
+  const [editing, setEditing] = useState(false);
+  const [productID, setProductID] = useState(space.product_id || "");
+  const [marketingGoal, setMarketingGoal] = useState(
+    space.marketing_goal || "conversion",
+  );
+  const [goalStage, setGoalStage] = useState(space.goal_stage || "action");
+  const [saving, setSaving] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const product = products.find((item) => item.id === space.product_id);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onUpdate(space.id, {
+        title: space.title,
+        summary: space.summary || "",
+        agent_brief: space.agent_brief || "",
+        product_id: productID,
+        marketing_goal: marketingGoal,
+        goal_stage: goalStage,
+      });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove() {
+    setDeleting(true);
+    try {
+      await onDelete(space.id);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <article className={editing ? "editing" : confirmingDelete ? "confirming-delete" : ""}>
+      <span className="space-card-icon">
+        <FolderKanban size={18} />
+      </span>
+      <div className="space-card-copy">
+        <button className="space-card-open" type="button" onClick={onOpen}>{space.title}<ChevronRight size={16} /></button>
+        <p>{space.summary || "继续上次的创作"}</p>
+        {editing ? (
+          <div className="space-product-editor">
+            <select
+              value={productID}
+              onChange={(event) => setProductID(event.target.value)}
+            >
+              <option value="">暂不选择产品资料</option>
+              {products.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.title}
+                </option>
+              ))}
+            </select>
+            <select
+              value={marketingGoal}
+              aria-label="广告创作目标"
+              onChange={(event) => setMarketingGoal(event.target.value)}
+            >
+              {marketingGoals.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={goalStage}
+              aria-label="营销阶段"
+              onChange={(event) => setGoalStage(event.target.value)}
+            >
+              {marketingStages.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <small>保存后只约束后续对话，历史内容保持不变。</small>
+          </div>
+        ) : (
+          <>
+            <div className="space-goal-tags">
+              <span>
+                {marketingLabel(marketingGoals, space.marketing_goal)}
+              </span>
+              <span>{marketingLabel(marketingStages, space.goal_stage)}</span>
+            </div>
+            <small>
+              {product?.title || "暂未关联资料"} · 产品素材 {space.asset_count || 0} 个 · <span title="按本周完成的视频统计">本周制作素材 {weeklyMaterialCount} 个</span>
+            </small>
+            {suggestion ? (
+              <button
+                className="space-next-action"
+                type="button"
+                onClick={() => onSuggestion(suggestion, "accepted")}
+              >
+                <Sparkles size={13} /> 下一步：{suggestion.title}{" "}
+                <ChevronRight size={13} />
+              </button>
+            ) : null}
+          </>
+        )}
+      </div>
+      <div className="space-card-actions">
+        {confirmingDelete ? (
+          <div className="space-delete-confirm">
+            <span>确认删除？</span>
+            <button
+              className="mini-button"
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+            >
+              取消
+            </button>
+            <button
+              className="danger-button"
+              type="button"
+              disabled={deleting}
+              onClick={remove}
+            >
+              {deleting ? "删除中" : "删除"}
+            </button>
+          </div>
+        ) : editing ? (
+          <>
+            <button className="mini-button" type="button" onClick={onOpen}>查看空间</button>
+            <button
+              className="mini-button"
+              type="button"
+              onClick={() => {
+                setProductID(space.product_id || "");
+                setMarketingGoal(space.marketing_goal || "conversion");
+                setGoalStage(space.goal_stage || "action");
+                setEditing(false);
+              }}
+            >
+              取消
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              disabled={saving}
+              onClick={save}
+            >
+              {saving ? "保存中" : "保存"}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="icon-button subtle"
+              title="删除空间"
+              aria-label={`删除 ${space.title}`}
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+            >
+              <Trash2 size={15} />
+            </button>
+            <button
+              className="mini-button"
+              type="button"
+              onClick={() => setEditing(true)}
+            >
+              设置
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={isSending}
+              onClick={() => onStart(space)}
+            >
+              {isSending ? "处理中" : "继续创作"}
+            </button>
+          </>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function ProductKnowledgeWorkspace({
+  products,
+  selectedProductId,
+  productPreview,
+  isLoadingProductPreview,
+  isCreatingProduct,
+  isSavingProduct,
+  error,
+  onSelect,
+  onStartJob,
+  onCreate,
+  onUpdate,
+}) {
+  const [editing, setEditing] = useState(false);
+  const [isNew, setIsNew] = useState(false);
+  const [isParsingDocument, setIsParsingDocument] = useState(false);
+  const [documentParseError, setDocumentParseError] = useState("");
+  const [parsedFilename, setParsedFilename] = useState("");
+  const [assets, setAssets] = useState([]);
+  const [observations, setObservations] = useState([]);
+  const [isUploadingAsset, setIsUploadingAsset] = useState(false);
+  const [previewAsset, setPreviewAsset] = useState(null);
+  const [selectedAssetId, setSelectedAssetId] = useState("");
+  const [deletingAssetId, setDeletingAssetId] = useState("");
+  const [replacingAssetId,setReplacingAssetId]=useState("");
+  const replaceInput=useRef(null), replaceTarget=useRef(null);
+  const [isSourcesOpen, setIsSourcesOpen] = useState(true);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const selected =
+    products.find((item) => item.id === selectedProductId) || products[0];
+  const selectedAsset =
+    assets.find((asset) => asset.id === selectedAssetId) ||
+    assets.find((asset) => asset.kind === "image") ||
+    assets[0];
+  const coverAsset =
+    assets.find((asset) => asset.kind === "image") || assets[0];
+  useEffect(() => {
+    if (!editing) {
+      setTitle(selected?.title || "");
+      setContent(productPreview?.content || "");
+    }
+  }, [selected?.id, productPreview?.content, editing]);
+  useEffect(() => {
+    if (!selected?.id) {
+      setAssets([]);
+      setObservations([]);
+      return;
+    }
+    listProductObservations(selected.id).then((items) => setObservations(Array.isArray(items) ? items : [])).catch(() => setObservations([]));
+    listProductAssets(selected.id)
+      .then((items) => {
+        const next = Array.isArray(items) ? items : [];
+        setAssets(next);
+        setSelectedAssetId(
+          next.find((asset) => asset.kind === "image")?.id || next[0]?.id || "",
+        );
+      })
+      .catch(() => setAssets([]));
+  }, [selected?.id]);
+  async function save(event) {
+    event.preventDefault();
+    if (selected) {
+      await onUpdate(selected.id, title, content);
+      setEditing(false);
+    }
+  }
+  async function addAsset(event) {
+    const file = event.target.files?.[0];
+    if (!file || !selected) return;
+    setIsUploadingAsset(true);
+    try {
+      const asset = await uploadProductAsset(selected.id, file);
+      setAssets((items) => [asset, ...items]);
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      event.target.value = "";
+      setIsUploadingAsset(false);
+    }
+  }
+  async function parseDocument(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setIsParsingDocument(true);
+    setDocumentParseError("");
+    try {
+      const result = await parseProductDocument(file);
+      setTitle(result.title || title);
+      setContent(result.content || "");
+      setParsedFilename(result.filename || file.name);
+    } catch (err) {
+      setDocumentParseError(err.message);
+    } finally {
+      event.target.value = "";
+      setIsParsingDocument(false);
+    }
+  }
+  function chooseReplacement(asset) {replaceTarget.current=asset;replaceInput.current?.click();}
+  async function replaceAsset(event) {
+    const file=event.target.files?.[0], asset=replaceTarget.current;event.target.value="";
+    if(!file||!asset||replacingAssetId)return;
+    if(!["image/jpeg","image/png","image/webp","image/gif"].includes(file.type)||file.size>20*1024*1024){window.alert("请选择 20MB 以内的 JPG、PNG、WEBP 或 GIF 图片");return;}
+    setReplacingAssetId(asset.id);
+    try {
+      const updated=await replaceProductAsset(asset.id,file);
+      setAssets(current=>current.map(item=>item.id===asset.id?updated:item));
+      setSelectedAssetId(current=>current===asset.id?updated.id:current);
+      setPreviewAsset(current=>current?.id===asset.id?updated:current);
+      setObservations(current=>current.map(item=>({...item,asset_ids:(item.asset_ids||[]).map(id=>id===asset.id?updated.id:id)})));
+    }catch(err){window.alert(err.message);}finally{setReplacingAssetId("");}
+  }
+  async function removeAsset(asset) {
+    setDeletingAssetId(asset.id);
+    try {
+      await detachProductAsset(asset.id);
+      setAssets((items) => items.filter((item) => item.id !== asset.id));
+      if (selectedAssetId === asset.id) setSelectedAssetId("");
+      if (previewAsset?.id === asset.id) setPreviewAsset(null);
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      setDeletingAssetId("");
+    }
+  }
+  function startNewProduct() {
+    setEditing(true);
+    setIsNew(true);
+    setTitle("");
+    setContent(
+      "# 产品资料\n\n## 核心卖点\n\n## 目标用户\n\n## 使用场景\n\n## 表达边界\n",
+    );
+    setParsedFilename("");
+    setDocumentParseError("");
+  }
+  return (
+    <section
+      className={`knowledge-workspace product-research-workspace ${
+        isSourcesOpen && !editing ? "sources-open" : "sources-closed"
+      }`}
+    >
+      {previewAsset ? (
+        <AssetPreviewModal
+          asset={previewAsset}
+          deleting={deletingAssetId === previewAsset.id}
+          replacing={replacingAssetId === previewAsset.id}
+          onReplace={chooseReplacement}
+          onClose={() => setPreviewAsset(null)}
+          onDelete={removeAsset}
+        />
+      ) : null}
+      <input ref={replaceInput} hidden type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={replaceAsset} />
+      <div className="research-layout">
+        <aside className="research-product-list" aria-label="我的产品">
+          <div className="research-list-head">
+            <strong>我的产品</strong>
+            <button type="button" onClick={startNewProduct} aria-label="新建产品">
+              <Plus size={18} />
+            </button>
+          </div>
+          <div className="research-product-rows">
+            {products.length ? (
+              products.map((item) => (
+                <button
+                  className={selected?.id === item.id ? "active" : ""}
+                  type="button"
+                  key={item.id}
+                  onClick={() => {
+                    setEditing(false);
+                    setIsNew(false);
+                    onSelect(item.id);
+                  }}
+                >
+                  <ProductListThumbnail product={item} />
+                  <span>
+                    <strong>{item.title}</strong>
+                  </span>
+                </button>
+              ))
+            ) : (
+              <EmptyState text="还没有产品资料" compact />
+            )}
+          </div>
+        </aside>
+        <main className="research-main">
+          {editing ? (
+            <form
+              className="living-product-editor research-product-editor"
+              onSubmit={async (event) => {
+                if (selected && !isNew) return save(event);
+                event.preventDefault();
+                const data = new FormData();
+                data.append("title", title);
+                data.append(
+                  "product_md",
+                  new File([content], `${title || "产品资料"}.md`, {
+                    type: "text/markdown",
+                  }),
+                );
+                await onCreate(data);
+                setIsNew(false);
+                setEditing(false);
+              }}
+            >
+              <div className="knowledge-editor-head">
+                <input
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="资料名称"
+                  required
+                />
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => {
+                    setEditing(false);
+                    setIsNew(false);
+                    setTitle(selected?.title || "");
+                    setContent(productPreview?.content || "");
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={isSavingProduct || isCreatingProduct}
+                  type="submit"
+                >
+                  {isSavingProduct || isCreatingProduct ? "保存中" : "保存资料"}
+                </button>
+              </div>
+              {isNew ? (
+                <section className="product-document-import">
+                  <div>
+                    <strong>从文件解析</strong>
+                    <small>支持 MD、PDF、DOC、DOCX，解析后可继续编辑</small>
+                  </div>
+                  <label className="secondary-button">
+                    {isParsingDocument ? (
+                      <Loader2 className="spin" size={15} />
+                    ) : (
+                      <Upload size={15} />
+                    )}
+                    {isParsingDocument ? "解析中" : "上传并解析"}
+                    <input
+                      type="file"
+                      accept=".md,.markdown,.pdf,.doc,.docx,text/markdown,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      disabled={isParsingDocument}
+                      onChange={parseDocument}
+                    />
+                  </label>
+                  {parsedFilename ? (
+                    <span className="document-parse-success">
+                      <CheckCircle2 size={14} />
+                      已解析 {parsedFilename}
+                    </span>
+                  ) : null}
+                  {documentParseError ? (
+                    <div className="error-banner">{documentParseError}</div>
+                  ) : null}
+                </section>
+              ) : null}
+              <textarea
+                value={content}
+                onChange={(event) => setContent(event.target.value)}
+                aria-label="产品资料内容"
+                required
+              />
+            </form>
+          ) : selected ? (
+            <>
+              <header className="research-product-head">
+                <div className="research-product-cover" aria-hidden="true">
+                  {coverAsset?.kind === "image" ? (
+                    <img src={`/api/assets/${coverAsset.id}/file`} alt="" />
+                  ) : (
+                    <Package size={28} />
+                  )}
+                </div>
+                <div className="research-product-title">
+                  <h1>{selected.title}</h1>
+                  <p>
+                    {assets.length} 个素材
+                    <span aria-hidden="true" />
+                    最近更新：{formatTime(selected.updated_at)}
+                  </p>
+                </div>
+                <details className="research-overflow">
+                  <summary aria-label="产品操作">•••</summary>
+                  <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(true);
+                      setIsNew(false);
+                    }}
+                  >
+                    <FileText size={15} />
+                    编辑产品资料
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onStartJob(selected.id)}
+                  >
+                    <Play size={15} />
+                    开始创作
+                  </button>
+                  </div>
+                </details>
+              </header>
+
+              <section className="research-product-document">
+                <h2>产品资料</h2>
+                {productPreview?.error ? (
+                  <div className="error-banner">{productPreview.error}</div>
+                ) : isLoadingProductPreview ? (
+                  <EmptyState text="正在读取产品资料" compact />
+                ) : productPreview?.content ? (
+                  <MarkdownContent content={productPreview.content} />
+                ) : (
+                  <EmptyState text="暂无产品资料内容" compact />
+                )}
+              </section>
+              {observations.length > 0 && <section className="research-product-document">
+                <h2>资产描述</h2>
+                <p>已导入资产的简要描述。</p>
+                <div className="product-observation-list">{observations.map(item => {
+                  const ids = item.asset_ids || [...(item.content || "").matchAll(/产品素材 ID `([^`]+)`/g)].map(match => match[1]);
+                  const media = ids.map(id => assets.find(asset => asset.id === id)).filter(Boolean);
+                  const description = item.description || (item.content || "").split(/\n\n/).slice(2).join("\n\n") || item.content || "";
+                  const excerpt = description.replace(/[#*_`>]/g, "").replace(/\s+/g," ").trim();
+                  return <article key={item.id} className="product-observation-card">
+                    <header><h3>{item.label || "视频提取资产"}</h3><time>{formatTime(item.created_at)}</time></header>
+                    {media.length > 0 && <div className="product-observation-media">{media.map(asset => <figure key={asset.id}>{asset.kind === "video" ? <video controls preload="metadata" src={`/api/assets/${asset.id}/file`} /> : <DownloadableImage src={`/api/assets/${asset.id}/file`} alt={asset.original_name} filename={asset.original_name} onPreview={()=>setPreviewAsset(asset)} />}<figcaption>{asset.original_name}</figcaption></figure>)}</div>}
+                    <details className="product-observation-description"><summary><span className="product-observation-excerpt">{excerpt}</span><span className="product-observation-expand">查看完整描述</span></summary><MarkdownContent content={description} /></details>
+                  </article>;
+                })}</div>
+              </section>}
+              {error ? <div className="error-banner research-error">{error}</div> : null}
+            </>
+          ) : (
+            <EmptyState text="从左侧选择资料，或新建一份" />
+          )}
+        </main>
+        {!editing ? (
+          <aside className="research-sources" aria-label="产品资料">
+            <header>
+              <h2>产品资料</h2>
+              <button type="button" onClick={() => setIsSourcesOpen(false)} aria-label="收起产品资料">
+                <X size={19} />
+              </button>
+            </header>
+            <details className="research-document-source">
+              <summary>
+                <FileText size={17} />
+                <span>
+                  <strong>{selected?.md_name || "产品文档"}</strong>
+                  <small>更新 {formatTime(selected?.updated_at)}</small>
+                </span>
+                <ChevronRight size={16} />
+              </summary>
+              <div className="research-document-preview">
+                {isLoadingProductPreview ? (
+                  <span>读取中</span>
+                ) : productPreview?.content ? (
+                  <MarkdownContent content={productPreview.content} />
+                ) : (
+                  <span>暂无文档内容</span>
+                )}
+              </div>
+            </details>
+
+            <section className="research-asset-source">
+              <div>
+                <strong>素材文件 ({assets.length})</strong>
+                <label>
+                  <Upload size={14} />
+                  {isUploadingAsset ? "上传中" : "添加"}
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={addAsset} />
+                </label>
+              </div>
+              {assets.length ? (
+                <div className="research-asset-strip">
+                  {assets.map((asset) => (
+                    <div className="research-asset-item" key={asset.id}><button type="button" className={asset.id === selectedAsset?.id ? "active" : ""} aria-label={`放大预览 ${asset.original_name}`} onClick={() => {setSelectedAssetId(asset.id);setPreviewAsset(asset);}} title={asset.original_name}>
+                      {asset.kind === "video" ? (
+                        <video src={`/api/assets/${asset.id}/file`} muted preload="metadata" />
+                      ) : (
+                        <img src={`/api/assets/${asset.id}/file`} alt="" />
+                      )}
+                      <span>{asset.original_name}</span>
+                    </button>{asset.kind !== "video" && <button type="button" className="research-asset-replace" aria-label={`替换图片 ${asset.original_name}`} title="上传本地图片替换" disabled={!!deletingAssetId || !!replacingAssetId} onClick={()=>chooseReplacement(asset)}>{replacingAssetId===asset.id?<Loader2 size={13}/>:<Upload size={13}/>}</button>}<button type="button" className="research-asset-remove" aria-label={`从产品资料移除 ${asset.original_name}`} title="从产品资料移除，保留作品库记录" disabled={!!deletingAssetId || !!replacingAssetId} onClick={() => removeAsset(asset)}><X size={13}/></button></div>
+                  ))}
+                </div>
+              ) : (
+                <p className="asset-empty">还没有图片或视频素材。</p>
+              )}
+            </section>
+
+            {selectedAsset ? (
+              <section className="research-selected-asset">
+                {selectedAsset.kind === "video" ? (
+                  <button type="button" className="research-selected-asset-preview" onClick={() => setPreviewAsset(selectedAsset)} aria-label={`预览 ${selectedAsset.original_name}`}>
+                    <video src={`/api/assets/${selectedAsset.id}/file`} muted preload="metadata" />
+                  </button>
+                ) : (
+                  <DownloadableImage src={`/api/assets/${selectedAsset.id}/file`} alt={selectedAsset.original_name} filename={selectedAsset.original_name} previewClassName="research-selected-asset-preview" onPreview={() => setPreviewAsset(selectedAsset)} />
+                )}
+                <dl>
+                  <div><dt>文件名</dt><dd>{selectedAsset.original_name}</dd></div>
+                  <div><dt>上传时间</dt><dd>{formatTime(selectedAsset.created_at)}</dd></div>
+                  <div><dt>文件大小</dt><dd>{formatBytes(selectedAsset.size_bytes)}</dd></div>
+                  <div><dt>文件类型</dt><dd>{selectedAsset.mime_type || selectedAsset.kind}</dd></div>
+                </dl>
+              </section>
+            ) : null}
+          </aside>
+        ) : null}
+        {!isSourcesOpen && !editing && selected ? (
+          <button type="button" className="research-open-sources" onClick={() => setIsSourcesOpen(true)}>
+            <FileText size={16} />
+            产品资料
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function ProductListThumbnail({ product }) {
+  const [asset, setAsset] = useState(null);
+  useEffect(() => {
+    let active = true;
+    listProductAssets(product.id)
+      .then((items) => {
+        if (!active) return;
+        const list = Array.isArray(items) ? items : [];
+        setAsset(list.find((item) => item.kind === "image") || null);
+      })
+      .catch(() => {
+        if (active) setAsset(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [product.id]);
+  return (
+    <span className="research-list-thumbnail" aria-hidden="true">
+      {asset ? <img src={`/api/assets/${asset.id}/file`} alt="" /> : <Package size={18} />}
+    </span>
+  );
+}
+
+function ProductMediaCard({ asset, deleting, onPreview, onDelete }) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <figure className="product-media-card">
+      {asset.kind === "video" ? <button
+        className="asset-preview-trigger"
+        type="button"
+        onClick={() => onPreview(asset)}
+        aria-label={`预览 ${asset.original_name}`}
+      >
+          <>
+            <video
+              src={`/api/assets/${asset.id}/file`}
+              muted
+              preload="metadata"
+            />
+            <span className="asset-play">
+              <Play size={18} />
+            </span>
+          </>
+      </button> : <DownloadableImage src={`/api/assets/${asset.id}/file`} alt={asset.original_name} filename={asset.original_name} previewClassName="asset-preview-trigger" onPreview={() => onPreview(asset)} />}
+      <figcaption title={asset.original_name}>{asset.original_name}</figcaption>
+      <div className="asset-card-actions">
+        {confirming ? (
+          <>
+            <button
+              className="danger"
+              type="button"
+              disabled={deleting}
+              onClick={() => onDelete(asset)}
+            >
+              {deleting ? "删除中" : "确认"}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)}>
+              取消
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={() => onPreview(asset)}>
+              预览
+            </button>
+            <button
+              className="danger"
+              type="button"
+              onClick={() => setConfirming(true)}
+            >
+              删除
+            </button>
+          </>
+        )}
+      </div>
+    </figure>
+  );
+}
+
+function AssetPreviewModal({ asset, deleting, replacing, onReplace, onClose, onDelete }) {
+  return (
+    <div
+      className="asset-preview-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="asset-preview-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`预览 ${asset.original_name}`}
+      >
+        <header>
+          <div>
+            <strong>{asset.original_name}</strong>
+            <small>
+              {asset.kind === "video" ? "视频" : "图片"} ·{" "}
+              {formatBytes(asset.size_bytes)}
+            </small>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭预览">
+            <X size={20} />
+          </button>
+        </header>
+        <div className="asset-preview-stage">
+          {asset.kind === "video" ? (
+            <video
+              src={`/api/assets/${asset.id}/file`}
+              controls
+              autoPlay
+              preload="metadata"
+            />
+          ) : (
+            <DownloadableImage
+              wrapperClassName="downloadable-stage-image"
+              src={`/api/assets/${asset.id}/file`}
+              alt={asset.original_name}
+              filename={asset.original_name}
+            />
+          )}
+        </div>
+        <footer><span>替换或移除仅影响产品资料，历史作品保留。</span>{asset.kind !== "video" && <button type="button" className="secondary-button" disabled={deleting||replacing} onClick={()=>onReplace(asset)}><Upload size={15}/>{replacing?"替换中…":"替换图片"}</button>}<button type="button" className="danger-button" disabled={deleting||replacing} onClick={()=>onDelete(asset)}><Trash2 size={15}/>{deleting?"移除中…":"从产品资料移除"}</button></footer>
+      </section>
+    </div>
+  );
+}
+
+const modelCapabilityCatalog = [
+  {
+    id: "text",
+    title: "文本与脚本",
+    description: "脚本生成、裂变策略、检查和普通对话",
+    endpoint:
+      "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    models: [
+      { id: "qwen3.8-flash", label: "Qwen 3.8 Flash（推荐）" },
+      { id: "qwen3.7-plus", label: "Qwen 3.7 Plus" },
+      { id: "qwen3.6-plus", label: "Qwen 3.6 Plus" },
+    ],
+  },
+  {
+    id: "multimodal",
+    title: "图片 / 视频理解",
+    description: "素材分析、广告复刻、镜头和音画拆解",
+    endpoint:
+      "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    models: [
+      { id: "qwen3.8-omni-flash", label: "Qwen 3.8 Omni Flash（推荐，音画理解）" },
+      { id: "qwen3.5-omni-flash", label: "Qwen 3.5 Omni Flash" },
+      { id: "qwen3.5-omni-plus", label: "Qwen 3.5 Omni Plus" },
+      { id: "kimi-k3", label: "Kimi K3（百炼，抽帧画面分析）" },
+      { id: "kimi-k2.6", label: "Kimi K2.6（百炼，视频画面分析）" },
+      { id: "qwen3-vl-8b-instruct", label: "Qwen3-VL 8B（仅视觉低成本）" },
+      { id: "qwen3-vl-30b-a3b-instruct", label: "Qwen3-VL 30B" },
+      { id: "qwen3-omni-30b-a3b-captioner", label: "Omni Captioner" },
+    ],
+  },
+  {
+    id: "image_generation",
+    title: "图片生成",
+    description: "分镜参考图、封面和产品场景图；需使用百炼工作空间图片地址",
+    endpoint:
+      "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    models: [
+      { id: "qwen-image-2.0", label: "Qwen Image 2.0（推荐）" },
+      { id: "qwen-image-2.0-pro", label: "Qwen Image 2.0 Pro" },
+    ],
+  },
+  {
+    id: "image_edit",
+    title: "图片编辑",
+    description: "换背景、局部修改和商品素材调整；需使用百炼工作空间图片地址",
+    endpoint:
+      "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    models: [
+      { id: "qwen-image-2.0", label: "Qwen Image 2.0（推荐，支持编辑）" },
+      { id: "qwen-image-edit-plus", label: "Qwen Image Edit Plus" },
+      { id: "qwen-image-edit-max", label: "Qwen Image Edit Max" },
+    ],
+  },
+  {
+    id: "video_generation",
+    title: "视频生成",
+    description: "章鱼哥 Seedance 与 MiniMax，文生视频和多素材参考，4–15 秒",
+    provider: "zexapi",
+    endpoint: "https://zexapi.com/v1/videos",
+    models: [
+      { id: "seedance-2.0", label: "Seedance 2.0" },
+      { id: "seedance-2.0-mini", label: "Seedance 2.0 Mini" },
+      { id: "minimax-h3", label: "MiniMax H3" },
+      { id: "minimax-h3-max", label: "MiniMax H3 Max" },
+    ],
+  },
+  {
+    id: "speech_recognition",
+    title: "语音识别",
+    description: "广告字幕逐句转写与时间定位",
+    provider: "openai",
+    endpoint: "https://api.openai.com/v1/audio/transcriptions",
+    models: [{ id: "whisper-1", label: "Whisper 1（逐句时间）" }],
+  },
+  {
+    id: "embedding",
+    title: "素材文字检索",
+    description: "产品文档和素材文字的相似搜索",
+    endpoint:
+      "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding",
+    models: [{ id: "text-embedding-v4", label: "Text Embedding V4（推荐）" }],
+  },
+];
+
+function ModelOnboarding({
+  modelSettings,
+  isSaving,
+  error,
+  onSave,
+  onLater,
+  onSettings,
+}) {
+  const savedProfiles = Object.fromEntries(
+    (modelSettings?.profiles || []).map((item) => [item.capability, item]),
+  );
+  const textCatalog = modelCapabilityCatalog.find((item) => item.id === "text");
+  const multimodalCatalog = modelCapabilityCatalog.find(
+    (item) => item.id === "multimodal",
+  );
+  const [textModel, setTextModel] = useState(
+    savedProfiles.text?.model || textCatalog.models[0].id,
+  );
+  const [multimodalModel, setMultimodalModel] = useState(
+    savedProfiles.multimodal?.model || multimodalCatalog.models[0].id,
+  );
+  return (
+    <div className="model-onboarding-backdrop" role="presentation">
+      <section
+        className="model-onboarding"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="model-onboarding-title"
+      >
+        <header>
+          <div>
+            <span className="eyebrow">开始前设置</span>
+            <h2 id="model-onboarding-title">选择常用模型</h2>
+            <p>先选两个常用能力，之后可在设置中更改。</p>
+          </div>
+          <button
+            className="model-onboarding-later"
+            type="button"
+            onClick={onLater}
+          >
+            稍后设置
+          </button>
+        </header>
+        <div className="model-onboarding-fields">
+          <label>
+            <span>
+              <Bot size={18} />
+              <b>对话与脚本</b>
+              <small>日常对话、策略和脚本生成</small>
+            </span>
+            <select
+              value={textModel}
+              onChange={(event) => setTextModel(event.target.value)}
+            >
+              {textCatalog.models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>
+              <Video size={18} />
+              <b>图片与视频理解</b>
+              <small>素材拆解、镜头和内容分析</small>
+            </span>
+            <select
+              value={multimodalModel}
+              onChange={(event) => setMultimodalModel(event.target.value)}
+            >
+              {multimodalCatalog.models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {error ? <div className="error-banner">{error}</div> : null}
+        <footer>
+          <button
+            className="model-settings-link"
+            type="button"
+            onClick={onSettings}
+          >
+            需要连接自己的 API？前往设置
+          </button>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={isSaving}
+            onClick={() =>
+              onSave({ text: textModel, multimodal: multimodalModel })
+            }
+          >
+            {isSaving ? (
+              <Loader2 className="spin" size={16} />
+            ) : (
+              <CheckCircle2 size={16} />
+            )}{" "}
+            {isSaving ? "保存中" : "保存并开始"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function SettingsWorkspace({
+  modelSettings,
+  canUseManaged,
+  showDebugPanel,
+  isSaving,
+  error,
+  onDebugPanel,
+  onSave,
+  ownerSession,
+  isOwnerLoading,
+  onOwnerLogin,
+}) {
+  const [sourceModes, setSourceModes] = useState({});
+  const savedProfiles = Object.fromEntries(
+    (modelSettings?.profiles || []).map((item) => [item.capability, item]),
+  );
+  return (
+    <section className="result-pane full-height">
+      <div className="result-header">
+        <div>
+          <h2>模型配置</h2>
+          <p>
+            平台模式使用运营后台统一配置的模型和 Key；个人模式使用此页保存的模型和 Key。
+          </p>
+        </div>
+        <span
+          className={`status-pill ${modelSettings?.configured ? "success" : "danger"}`}
+        >
+          <KeyRound size={13} />
+          {modelSettings?.configured ? "已配置" : "未配置"}
+        </span>
+      </div>
+      <form className="settings-form" onSubmit={onSave}>
+        <CreditUsagePanel />
+        {error ? <div className="error-banner">{error}</div> : null}
+        <details className="settings-security-note">
+          <summary><KeyRound size={15} /> 密钥如何保存</summary>
+          <p>API Key 保存在当前部署的本地数据库。请勿分享数据库文件；团队部署建议启用密钥加密。</p>
+        </details>
+        {modelCapabilityCatalog.map((capability) => {
+          const saved = savedProfiles[capability.id] || {};
+          const selectedSource = canUseManaged ? (sourceModes[capability.id] || saved.mode || "byok") : "byok";
+          const selectedModel = capability.models.find(
+            (model) => model.id === (saved.model || capability.models[0].id),
+          );
+          return (
+            <details className="settings-capability" key={capability.id}>
+              <summary>
+                <span className={`settings-status-dot ${saved.configured ? "ready" : "missing"}`} />
+                <span className="settings-capability-copy">
+                  <strong>{capability.title}</strong>
+                  <small>{capability.description}</small>
+                </span>
+                <span className="settings-current-model">
+                  <strong>{selectedModel?.label || saved.model || "未选择模型"}</strong>
+                  <small>{saved.mode === "byok" ? "自己的 API" : "平台额度"}</small>
+                </span>
+                <span className={`settings-state ${saved.configured ? "ready" : "missing"}`}>
+                  {saved.configured ? "已配置" : "未配置"}
+                </span>
+                <span className="settings-edit-label">编辑</span>
+                <ChevronDown size={16} />
+              </summary>
+              <div className="settings-capability-editor">
+                <div className="upload-grid">
+                  <label>
+                    <span>额度来源</span>
+                    <select name={`${capability.id}_mode`} value={selectedSource} onChange={(event) => setSourceModes((current) => ({ ...current, [capability.id]: event.target.value }))}>
+                      {canUseManaged && <option value="managed">平台托管</option>}
+                      <option value="byok">用户自己的 API Key</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>服务商</span>
+                    <select name={`${capability.id}_provider`} defaultValue={saved.provider || capability.provider || "dashscope"} disabled={selectedSource === "managed"}>
+                      {capability.id === "video_generation" && <option value="zexapi">章鱼哥 AI</option>}
+ {capability.id !== "speech_recognition" && capability.id !== "video_generation" && <option value="dashscope">阿里云百炼</option>}
+                      {["text", "multimodal", "speech_recognition"].includes(capability.id) ? <option value="openai">OpenAI 兼容接口</option> : null}
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  <span>模型</span>
+                  <select name={`${capability.id}_model`} defaultValue={saved.model || capability.models[0].id} disabled={selectedSource === "managed"}>
+                    {capability.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                  </select>
+                </label>
+                {capability.id === "multimodal" && <small className="settings-model-hint">百炼 Kimi K2.6/K3 需填写开通模型的业务空间对应地域接口地址；K2.6 读视频画面，K3 读抽帧图片，声音由 Omni 核对。</small>}
+                <label>
+                  <span>API Key</span>
+                  <input name={`${capability.id}_api_key`} type="password" placeholder={saved.api_key_mask ? `留空保留 ${saved.api_key_mask}` : "使用自己的 API 时填写"} autoComplete="new-password" disabled={selectedSource === "managed"} />
+                </label>
+                <details className="settings-advanced">
+                  <summary>自定义接口地址</summary>
+                  <label>
+                    <span>接口地址</span>
+                    <input name={`${capability.id}_endpoint`} defaultValue={saved.endpoint || capability.endpoint} disabled={selectedSource === "managed"} />
+                  </label>
+                </details>
+              </div>
+            </details>
+          );
+        })}
+        <details className="settings-secondary-section">
+          <summary><Activity size={16} /><span><strong>开发者选项</strong><small>{showDebugPanel ? "已开启" : "默认关闭"}</small></span><ChevronDown size={16} /></summary>
+          <div className="settings-secondary-body">
+          <label className="toggle-row">
+            <span>
+              <strong>显示开发者模式</strong>
+              <small>查看模型输入输出、token、原始响应。</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={showDebugPanel}
+              onChange={(event) => onDebugPanel(event.target.checked)}
+            />
+          </label>
+          </div>
+        </details>
+        {ownerSession?.authenticated && <details className="settings-secondary-section owner-login-section">
+          <summary><ShieldCheck size={16} /><span><strong>运营后台</strong><small>{ownerSession?.authenticated ? "管理员已登录" : "仅所有者可见"}</small></span><ChevronDown size={16} /></summary>
+          <div className="settings-secondary-body">
+          <div className="section-heading">
+            <span>运营后台</span>
+            <small>
+              {ownerSession?.authenticated ? "管理员已登录" : "仅所有者可见"}
+            </small>
+          </div>
+            <div className="owner-authenticated">
+              <CheckCircle2 size={18} />
+              <div>
+                <strong>身份验证有效</strong>
+                <small>运营后台入口已显示在侧栏。</small>
+              </div>
+            </div>
+          </div>
+        </details>}
+        <div className="submit-row">
+          <div>
+            <span>运行时配置</span>
+            <small>每类能力独立生效，用户 Key 不会覆盖其他模型</small>
+          </div>
+          <button className="primary-button" type="submit" disabled={isSaving}>
+            {isSaving ? (
+              <Loader2 className="spin" size={16} />
+            ) : (
+              <Settings size={16} />
+            )}
+            <span>{isSaving ? "保存中" : "保存配置"}</span>
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function OwnerDashboard({ overview, isLoading, error, onRefresh, onLogout }) {
+  const totals = overview?.totals || {};
+  const metrics = [
+    ["创意空间", totals.spaces || 0],
+    ["任务总数", totals.jobs || 0],
+    ["Agent Runs", totals.runs || 0],
+    ["模型调用", totals.model_calls || 0],
+    ["Token 总量", formatNumber(totals.total_tokens || 0)],
+    ["已发布脚本", totals.published_jobs || 0],
+  ];
+  return (
+    <section className="owner-dashboard">
+      <header className="owner-dashboard-head">
+        <div>
+          <span>OWNER ONLY</span>
+          <h1>产品运营总览</h1>
+          <p>跨空间查看任务产出、Agent 运行和模型消耗。</p>
+        </div>
+        <div>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={onRefresh}
+            disabled={isLoading}
+          >
+            <RefreshCw size={15} />
+            刷新
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={onLogout}
+            disabled={isLoading}
+          >
+            退出登录
+          </button>
+        </div>
+      </header>
+      <InviteManager />
+      <AccountManager />
+      {error ? <div className="error-banner">{error}</div> : null}
+      {!overview || isLoading ? (
+        <div className="debug-empty">
+          <Loader2 className="spin" size={26} />
+          <strong>正在读取运营数据</strong>
+        </div>
+      ) : (
+        <>
+          <div className="owner-metrics">
+            {metrics.map(([label, value]) => (
+              <article key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </article>
+            ))}
+          </div>
+          <div className="owner-dashboard-grid">
+            <section>
+              <div className="debug-section-head">
+                <h2>空间表现</h2>
+                <span>{overview.spaces?.length || 0} 个空间</span>
+              </div>
+              <div className="owner-space-table">
+                {overview.spaces?.map((space) => (
+                  <article key={space.id}>
+                    <div>
+                      <strong>{space.title}</strong>
+                      <small>
+                        {space.runs} 次运行 · {space.model_calls} 次调用
+                      </small>
+                    </div>
+                    <span>{formatNumber(space.total_tokens)} tokens</span>
+                    <span
+                      className={
+                        space.failed_runs ? "owner-failed" : "owner-healthy"
+                      }
+                    >
+                      {space.failed_runs
+                        ? `${space.failed_runs} 次失败`
+                        : "运行正常"}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            </section>
+            <section>
+              <div className="debug-section-head">
+                <h2>最近运行</h2>
+                <span>{overview.recent_runs?.length || 0} 条</span>
+              </div>
+              <div className="owner-run-list">
+                {overview.recent_runs?.length ? (
+                  overview.recent_runs.map((run) => (
+                    <article key={run.ID}>
+                      <div>
+                        <strong>{run.SpaceTitle}</strong>
+                        <small>{formatTime(run.StartedAt)}</small>
+                      </div>
+                      <span
+                        className={`debug-call-status ${run.Status === "failed" ? "danger" : "success"}`}
+                      >
+                        {run.Status === "failed"
+                          ? "失败"
+                          : run.Status === "completed"
+                            ? "完成"
+                            : "运行中"}
+                      </span>
+                    </article>
+                  ))
+                ) : (
+                  <div className="debug-empty compact">暂无运行记录</div>
+                )}
+              </div>
+            </section>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function ModelCallsWorkspace({ calls = [], spaces = [], error }) {
+  const [expandedCallId, setExpandedCallId] = useState("");
+  const [selectedSpaceId, setSelectedSpaceId] = useState("");
+  const [observability, setObservability] = useState({
+    runs: [],
+    steps: [],
+    model_calls: [],
+    memory_events: [],
+  });
+  const [isLoadingObservability, setIsLoadingObservability] = useState(false);
+  const [observabilityError, setObservabilityError] = useState("");
+  const activeSpaceId = spaces.some((space) => space.id === selectedSpaceId)
+    ? selectedSpaceId
+    : "";
+  const visibleCalls = activeSpaceId ? observability.model_calls || [] : calls;
+  const runs = observability.runs || [];
+  const runSteps = observability.steps || [];
+  const memoryEvents = observability.memory_events || [];
+  const totalInput = visibleCalls.reduce(
+    (total, call) => total + Number(call.prompt_tokens || 0),
+    0,
+  );
+  const totalOutput = visibleCalls.reduce(
+    (total, call) => total + Number(call.output_tokens || 0),
+    0,
+  );
+  const totalLatency = visibleCalls.reduce(
+    (total, call) => total + Number(call.latency_ms || 0),
+    0,
+  );
+  const runCount = activeSpaceId
+    ? runs.length
+    : new Set(visibleCalls.map((call) => call.run_id).filter(Boolean)).size;
+
+  useEffect(() => {
+    if (!activeSpaceId) {
+      setObservability({
+        runs: [],
+        steps: [],
+        model_calls: [],
+        memory_events: [],
+      });
+      setObservabilityError("");
+      setIsLoadingObservability(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setIsLoadingObservability(true);
+    setObservabilityError("");
+    getSpaceObservability(activeSpaceId)
+      .then((result) => {
+        if (!cancelled) setObservability(result);
+      })
+      .catch((err) => {
+        if (!cancelled) setObservabilityError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingObservability(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSpaceId]);
+
+  const metrics = [
+    ["输入 Token", formatNumber(totalInput)],
+    ["输出 Token", formatNumber(totalOutput)],
+    ["缓存读取", "0"],
+    ["缓存写入", "0"],
+    ["总耗时", formatDuration(totalLatency)],
+    ["API 耗时", visibleCalls.length ? formatDuration(totalLatency) : "未返回"],
+    ["首 Token", "未返回"],
+    ["缓存命中率", "0%"],
+  ];
+
+  return (
+    <section className="debug-observer">
+      <header className="debug-observer-head">
+        <div className="debug-observer-title">
+          <Activity size={20} />
+          <strong>开发者模式</strong>
+        </div>
+        <div className="debug-space-control">
+          <label htmlFor="debug-space">运行范围</label>
+          <select
+            id="debug-space"
+            value={activeSpaceId}
+            onChange={(event) => {
+              setSelectedSpaceId(event.target.value);
+              setExpandedCallId("");
+            }}
+          >
+            <option value="">全部运行（含对话）</option>
+            {spaces.map((space) => (
+              <option value={space.id} key={space.id}>
+                {space.title}
+              </option>
+            ))}
+          </select>
+          <span>
+            {runCount} 次运行 · {visibleCalls.length} 次调用
+          </span>
+        </div>
+      </header>
+      {error ? <div className="error-banner">{error}</div> : null}
+      {observabilityError ? (
+        <div className="error-banner">{observabilityError}</div>
+      ) : null}
+
+      <div className="debug-observer-body">
+        <div className="debug-intro">
+          <h1>Agent Loop 观测</h1>
+          <p>查看每次模型请求、响应、Token 与耗时。敏感信息会在服务端脱敏。</p>
+        </div>
+
+        <div className="debug-metric-grid">
+          {metrics.map(([label, value]) => (
+            <div className="debug-metric" key={label}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+
+        <section className="debug-section">
+          <div className="debug-section-head">
+            <h2>模型调用</h2>
+            <span>{visibleCalls.length} 次</span>
+          </div>
+          <div className="debug-call-list">
+            {isLoadingObservability ? (
+              <div className="debug-empty compact">
+                <Loader2 className="spin" size={24} />
+                <strong>正在加载空间运行记录</strong>
+              </div>
+            ) : visibleCalls.length ? (
+              visibleCalls.map((call, index) => {
+                const expanded = expandedCallId === call.id;
+                return (
+                  <article
+                    className={`debug-call ${expanded ? "expanded" : ""}`}
+                    key={call.id}
+                  >
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      onClick={() => setExpandedCallId(expanded ? "" : call.id)}
+                    >
+                      {expanded ? (
+                        <ChevronDown size={18} />
+                      ) : (
+                        <ChevronRight size={18} />
+                      )}
+                      <strong>第 {index + 1} 次模型请求</strong>
+                      <span className="debug-call-model">
+                        {call.scope || "agent"} · {call.step || "模型调用"}
+                      </span>
+                      <span
+                        className={`debug-call-status ${call.error_message ? "danger" : "success"}`}
+                      >
+                        {call.error_message ? "失败" : "完成"}
+                      </span>
+                    </button>
+                    {expanded ? (
+                      <div className="debug-call-detail">
+                        <div className="debug-call-meta">
+                          <span>
+                            输入 {formatNumber(call.prompt_tokens || 0)}
+                          </span>
+                          <span>
+                            输出 {formatNumber(call.output_tokens || 0)}
+                          </span>
+                          <span>
+                            耗时 {formatDuration(call.latency_ms || 0)}
+                          </span>
+                          <span>{formatTime(call.created_at)}</span>
+                        </div>
+                        {call.error_message ? (
+                          <div className="error-banner">
+                            {call.error_message}
+                          </div>
+                        ) : null}
+                        <section>
+                          <h3>模型输入</h3>
+                          <pre className="result-output json">
+                            {pretty(call.input_json)}
+                          </pre>
+                        </section>
+                        <section>
+                          <h3>模型输出</h3>
+                          <pre className="result-output markdown">
+                            {call.output_text || "-"}
+                          </pre>
+                        </section>
+                        <section>
+                          <h3>原始响应</h3>
+                          <pre className="result-output json">
+                            {pretty(call.response_json)}
+                          </pre>
+                        </section>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })
+            ) : (
+              <div className="debug-empty compact">
+                <CircleHelp size={24} />
+                <strong>暂无模型调用记录</strong>
+                <p>
+                  {activeSpaceId
+                    ? "这个创意空间还没有运行记录。"
+                    : "运行 Agent 后，请求详情会实时显示在这里。"}
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="debug-section memory-section">
+          <div className="debug-section-head">
+            <h2>运行步骤</h2>
+            <span>{runSteps.length} 条</span>
+          </div>
+          {runSteps.length ? (
+            <div className="debug-memory-list">
+              {runSteps.map((step) => (
+                <article key={step.id}>
+                  <strong>
+                    {step.index}. {step.key}
+                  </strong>
+                  <span>
+                    {step.output_summary || step.input_summary || "-"}
+                  </span>
+                  <time>
+                    {step.status} · {formatTime(step.started_at)}
+                  </time>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="debug-empty">
+              <CircleHelp size={28} />
+              <strong>暂无运行步骤</strong>
+              <p>
+                {activeSpaceId
+                  ? "任务开始后会按 Run 记录工作流步骤。"
+                  : "选择创意空间后，可查看该空间的工作流步骤。"}
+              </p>
+            </div>
+          )}
+        </section>
+
+        <section className="debug-section memory-section">
+          <div className="debug-section-head">
+            <h2>Memory 行为</h2>
+            <span>{memoryEvents.length} 条</span>
+          </div>
+          {memoryEvents.length ? (
+            <div className="debug-memory-list">
+              {memoryEvents.map((event) => (
+                <article key={event.id}>
+                  <strong>{event.kind}</strong>
+                  <span>{event.payload || "-"}</span>
+                  <time>{formatTime(event.created_at)}</time>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="debug-empty">
+              <CircleHelp size={28} />
+              <strong>本次运行没有 Memory 事件</strong>
+              <p>
+                {activeSpaceId
+                  ? "挂载、提取、Dream、同步和冲突会在这里实时显示。"
+                  : "选择创意空间后，可查看该空间的 Memory 行为。"}
+              </p>
+            </div>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+}
+
+function formatDuration(milliseconds) {
+  const value = Number(milliseconds || 0);
+  if (!value) return "0 秒";
+  if (value < 1000) return `${value} 毫秒`;
+  const seconds = Math.round(value / 1000);
+  if (seconds < 60) return `${seconds} 秒`;
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+function FileField({ name, label, accept, icon, required = true }) {
+  return (
+    <label className="file-field">
+      <span>{label}</span>
+      <div className="file-input">
+        {icon}
+        <input name={name} type="file" accept={accept} required={required} />
+        <Upload size={16} />
+      </div>
+    </label>
+  );
+}
+
+function ResultHeader({ job, isRetrying, canRetry, onRetry }) {
+  const subtitle = useMemo(() => {
+    if (!job) return "选择历史记录或创建新任务后查看结果。";
+    return `${job.video_original_name} · ${job.product_md_name}`;
+  }, [job]);
+
+  return (
+    <div className="result-header">
+      <div>
+        <h2>{job?.title || "任务结果"}</h2>
+        <p>{subtitle}</p>
+      </div>
+      {job ? (
+        <div className="result-actions">
+          <span className={`status-pill ${statusTone(job.status)}`}>
+            {runningStatuses.has(job.status) ? (
+              <Clock3 size={13} />
+            ) : (
+              <CheckCircle2 size={13} />
+            )}
+            {statusLabel(job.status)}
+          </span>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={onRetry}
+            disabled={!canRetry || isRetrying}
+          >
+            {isRetrying ? (
+              <Loader2 className="spin" size={16} />
+            ) : (
+              <RotateCcw size={16} />
+            )}
+            <span>重试</span>
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ResultContent({ job, content, activeTab, isGeneratingVideoPrompts }) {
+  if (!job) return <EmptyState text="暂无任务结果" />;
+  if (job.error_message && job.status === "failed")
+    return (
+      <pre className="result-output error-output">{job.error_message}</pre>
+    );
+  if (activeTab === "video_prompts" && isGeneratingVideoPrompts)
+    return <EmptyState text="正在生成 Seedance 视频提示词" />;
+  if (!content)
+    return (
+      <EmptyState
+        text={runningStatuses.has(job.status) ? "任务执行中" : "当前页暂无内容"}
+      />
+    );
+  if (activeTab === "run_log") return <TimelineContent content={content} />;
+  if (activeTab === "analysis_markdown")
+    return <MarkdownContent content={content} />;
+  if (activeTab === "video_prompts")
+    return <MarkdownContent content={content} />;
+  return <ScriptJSONContent content={content} activeTab={activeTab} />;
+}
+
+function TimelineContent({ content }) {
+  const lines = content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (
+    <div className="timeline-output">
+      {lines.map((line, index) => (
+        <div key={`${line}-${index}`} className="timeline-item">
+          <span>{String(index + 1).padStart(2, "0")}</span>
+          <p>{line}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MarkdownContent({ content }) {
+  const blocks = markdownBlocks(content);
+  return (
+    <div className="markdown-output">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const Tag = block.level <= 2 ? "h3" : "h4";
+          return <Tag key={index}>{block.text}</Tag>;
+        }
+        if (block.type === "table") {
+          return (
+            <div key={index} className="table-wrap">
+              <table>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, cellIndex) => {
+                        const Cell = rowIndex === 0 ? "th" : "td";
+                        return <Cell key={cellIndex}>{cell}</Cell>;
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        return <p key={index}>{block.text}</p>;
+      })}
+    </div>
+  );
+}
+
+function ScriptJSONContent({ content, activeTab }) {
+  const parsed = parseJSONValue(content);
+  const scripts = extractScripts(parsed, activeTab);
+  return (
+    <div className="json-review">
+      {scripts.length ? (
+        <div className="script-card-list">
+          {scripts.map((script, index) => (
+            <article key={index} className="script-card">
+              <div>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <h3>
+                  {script.metadata?.title ||
+                    script.title ||
+                    (activeTab === "replica_script_json"
+                      ? "复刻脚本"
+                      : "裂变脚本")}
+                </h3>
+                <p>
+                  {script.metadata?.fission_dimension ||
+                    script.metadata?.industry ||
+                    "分镜脚本"}
+                </p>
+              </div>
+              <strong>
+                {Array.isArray(script.storyboards)
+                  ? script.storyboards.length
+                  : 0}{" "}
+                镜
+              </strong>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      <details className="raw-json" open={!scripts.length}>
+        <summary>原始 JSON</summary>
+        <pre className="result-output json">{pretty(content)}</pre>
+      </details>
+    </div>
+  );
+}
+
+function EmptyState({ text, compact = false }) {
+  return (
+    <div className={`empty-state ${compact ? "compact" : ""}`}>
+      <FileText size={24} />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function statusLabel(status) {
+  const labels = {
+    pending: "等待中",
+    running: "运行中",
+    analyzing_video: "分析视频",
+    extracting_structure: "提取结构",
+    generating_replica: "生成复刻",
+    generating_fission: "生成裂变",
+    validating: "校验中",
+    completed: "已完成",
+    publishing: "发布中",
+    published: "已发布",
+    failed: "失败",
+  };
+  return labels[status] || status;
+}
+
+function statusTone(status) {
+  if (status === "failed") return "danger";
+  if (status === "completed" || status === "published") return "success";
+  return "neutral";
+}
+
+function markdownBlocks(content) {
+  const lines = content.split("\n");
+  const blocks = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (!line) continue;
+    if (line.startsWith("|")) {
+      const rows = [];
+      while (index < lines.length && lines[index].trim().startsWith("|")) {
+        const row = splitMarkdownRow(lines[index]);
+        if (!row.every((cell) => /^:?-{2,}:?$/.test(cell))) {
+          rows.push(row);
+        }
+        index += 1;
+      }
+      index -= 1;
+      if (rows.length) blocks.push({ type: "table", rows });
+      continue;
+    }
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) {
+      blocks.push({
+        type: "heading",
+        level: heading[1].length,
+        text: heading[2],
+      });
+      continue;
+    }
+    blocks.push({ type: "paragraph", text: line.replace(/^\s*[-*]\s+/, "") });
+  }
+  return blocks;
+}
+
+function splitMarkdownRow(line) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim() || "-");
+}
+
+function parseJSONValue(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function extractScripts(parsed, activeTab) {
+  if (!parsed) return [];
+  if (Array.isArray(parsed)) return parsed;
+  if (Array.isArray(parsed.fission_scripts)) return parsed.fission_scripts;
+  if (parsed.replica_script) return [parsed.replica_script];
+  if (activeTab === "replica_script_json" && Array.isArray(parsed.storyboards))
+    return [parsed];
+  return [];
+}
+
+function pretty(value) {
+  if (!value) return "-";
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function formatTime(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatChatTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  const part = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}/${part(date.getMonth() + 1)}/${part(date.getDate())} ${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`;
+}

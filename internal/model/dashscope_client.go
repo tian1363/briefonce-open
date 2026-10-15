@@ -1,0 +1,667 @@
+package model
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/tian1363/scriptagent/internal/telemetry"
+	"github.com/tian1363/scriptagent/internal/userctx"
+)
+
+const (
+	DefaultDashScopeEndpoint          = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+	DefaultDashScopeEmbeddingEndpoint = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+)
+
+type DashScopeClient struct {
+	apiKey              string
+	endpoint            string
+	model               string
+	embeddingEndpoint   string
+	embeddingModel      string
+	embeddingDimensions int
+	httpClient          *http.Client
+	recorder            Recorder
+	provider            ConfigProvider
+	allowManaged        bool
+}
+
+type DashScopeConfig struct {
+	APIKey              string
+	Endpoint            string
+	Model               string
+	EmbeddingEndpoint   string
+	EmbeddingModel      string
+	EmbeddingDimensions int
+	Recorder            Recorder
+	Provider            ConfigProvider
+	AllowManaged        bool
+}
+
+type RuntimeConfig struct {
+	SupplierAccount   string
+	ImagePriceVersion int64
+	ImageUserID       string
+	ImageChargeID     string
+	ImageRefID        string
+	ImageAspectRatio  string
+	ImageSize         string
+	ImagePixelSize    string
+	APIKey            string
+	Provider          string
+	Endpoint          string
+	Model             string
+	Source            string
+}
+
+type ConfigProvider interface {
+	GetModelRuntimeConfig(ctx context.Context, capability string) (RuntimeConfig, error)
+}
+
+type ManagedCredentialProvider interface {
+	ManagedAPIKey() (string, error)
+}
+
+func NewDashScopeClient(cfg DashScopeConfig) *DashScopeClient {
+	endpoint := cfg.Endpoint
+	if endpoint == "" {
+		endpoint = DefaultDashScopeEndpoint
+	}
+	modelName := cfg.Model
+	if modelName == "" {
+		modelName = "qwen3.6-plus"
+	}
+	embeddingEndpoint := cfg.EmbeddingEndpoint
+	if embeddingEndpoint == "" {
+		embeddingEndpoint = DefaultDashScopeEmbeddingEndpoint
+	}
+	embeddingModel := cfg.EmbeddingModel
+	if embeddingModel == "" {
+		embeddingModel = "text-embedding-v4"
+	}
+	embeddingDimensions := cfg.EmbeddingDimensions
+	if embeddingDimensions <= 0 {
+		embeddingDimensions = 1024
+	}
+	return &DashScopeClient{
+		apiKey:              cfg.APIKey,
+		endpoint:            endpoint,
+		model:               modelName,
+		embeddingEndpoint:   embeddingEndpoint,
+		embeddingModel:      embeddingModel,
+		embeddingDimensions: embeddingDimensions,
+		httpClient:          &http.Client{Timeout: 10 * time.Minute},
+		recorder:            cfg.Recorder,
+		provider:            cfg.Provider,
+		allowManaged:        cfg.AllowManaged,
+	}
+}
+
+func (c *DashScopeClient) Generate(ctx context.Context, content []ContentItem) (string, error) {
+	result, err := c.GenerateDetailed(ctx, CallContext{}, content)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+func (c *DashScopeClient) GenerateDetailed(ctx context.Context, callCtx CallContext, content []ContentItem) (generation Generation, callErr error) {
+	runtime := c.runtimeConfig(ctx, capabilityForContent(content))
+	traceInput, _ := json.Marshal(telemetryContent(content))
+	ctx, span := telemetry.StartGeneration(ctx, telemetry.GenerationAttributes{
+		Name:      callCtx.Step,
+		TraceName: callCtx.TraceName,
+		RunID:     callCtx.RunID,
+		SpaceID:   callCtx.SpaceID,
+		RefID:     callCtx.RefID,
+		SessionID: callCtx.SessionID,
+		Model:     runtime.Model,
+		Input:     string(traceInput),
+	})
+	defer func() {
+		telemetry.EndGeneration(span, generation.Text, generation.PromptTokens, generation.OutputTokens, generation.TotalTokens, callErr)
+	}()
+	if runtime.APIKey == "" {
+		return Generation{}, errors.New("当前没有可用的模型额度，请前往设置连接 API Key")
+	}
+	finish, err := c.beginUsage(ctx, runtime, capabilityForContent(content), 1, callCtx)
+	if err != nil {
+		return Generation{}, err
+	}
+	defer func() { finish(callErr == nil) }()
+	if runtime.Provider == "openai" || runtime.Provider == "kimi" {
+		return c.generateOpenAICompatible(ctx, callCtx, runtime, content)
+	}
+	messages := make([]message, 0, 2)
+	if systemPrompt := strings.TrimSpace(callCtx.SystemPrompt); systemPrompt != "" {
+		messages = append(messages, message{Role: "system", Content: systemPrompt})
+	}
+	messages = append(messages, message{Role: "user", Content: content})
+	reqBody := requestBody{
+		Model: runtime.Model,
+		Input: requestInput{
+			Messages: messages,
+		},
+	}
+	raw, err := json.Marshal(reqBody)
+	if err != nil {
+		return Generation{}, err
+	}
+	logRaw, err := json.Marshal(sanitizedRequestBody(reqBody))
+	if err != nil {
+		return Generation{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, runtime.Endpoint, bytes.NewReader(raw))
+	if err != nil {
+		return Generation{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+runtime.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	started := time.Now()
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		c.record(ctx, callCtx, runtime.Model, logRaw, nil, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
+		return Generation{}, err
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 20*1024*1024))
+	if err != nil {
+		c.record(ctx, callCtx, runtime.Model, logRaw, nil, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
+		return Generation{}, err
+	}
+	logBody := sanitizedResponseJSON(body)
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		rawErr := fmt.Errorf("dashscope request failed with status %d: %s", res.StatusCode, string(body))
+		c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, rawErr)
+		return Generation{}, friendlyDashScopeError(res.StatusCode, body)
+	}
+
+	var parsed responseBody
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
+		return Generation{}, err
+	}
+	if len(parsed.Output.Choices) == 0 {
+		err := errors.New("dashscope response has no choices")
+		c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
+		return Generation{}, err
+	}
+	choice := parsed.Output.Choices[0]
+	for _, item := range choice.Message.Content {
+		if item.Text != "" {
+			result := Generation{
+				Text:         item.Text,
+				Model:        runtime.Model,
+				RequestJSON:  string(logRaw),
+				ResponseJSON: string(logBody),
+				PromptTokens: parsed.Usage.promptTokens(),
+				OutputTokens: parsed.Usage.outputTokens(),
+				TotalTokens:  parsed.Usage.totalTokens(),
+				LatencyMS:    elapsedMS(started),
+			}
+			c.record(ctx, callCtx, runtime.Model, logRaw, logBody, result, nil)
+			return result, nil
+		}
+	}
+	err = errors.New("dashscope response has no text content")
+	c.record(ctx, callCtx, runtime.Model, logRaw, logBody, Generation{Model: runtime.Model, LatencyMS: elapsedMS(started)}, err)
+	return Generation{}, err
+}
+
+func friendlyDashScopeError(status int, body []byte) error {
+	var response struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(body, &response)
+	switch response.Code {
+	case "Arrearage":
+		return errors.New("模型账户余额或可用额度不足，请充值或确认免费额度已生效后重试")
+	case "InvalidApiKey", "InvalidAccessKey":
+		return errors.New("模型 API Key 无效，请在设置中重新配置")
+	case "AccessDenied":
+		return errors.New("当前模型账户没有调用权限，请检查模型开通状态")
+	case "Throttling", "Throttling.RateQuota", "Throttling.BurstRate":
+		return errors.New("模型请求过于频繁，请稍后重试")
+	}
+	if status >= http.StatusInternalServerError {
+		return errors.New("模型服务暂时不可用，请稍后重试")
+	}
+	return errors.New("模型请求失败，请检查模型配置后重试")
+}
+
+func telemetryContent(content []ContentItem) []map[string]any {
+	result := make([]map[string]any, 0, len(content))
+	for _, item := range content {
+		value := map[string]any{}
+		if item.Text != "" {
+			value["text"] = item.Text
+		}
+		if item.Video != "" {
+			value["video"] = "[video data omitted]"
+			value["fps"] = item.FPS
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
+func (c *DashScopeClient) runtimeConfig(ctx context.Context, capability string) RuntimeConfig {
+	runtime := RuntimeConfig{
+		APIKey:   c.apiKey,
+		Provider: "dashscope",
+		Endpoint: c.endpoint,
+		Model:    c.model,
+		Source:   "env",
+	}
+	if userctx.UserID(ctx) != "" || (c.allowManaged && c.provider != nil) {
+		runtime.APIKey = ""
+	}
+	if c.provider != nil {
+		if provided, err := c.provider.GetModelRuntimeConfig(ctx, capability); err == nil {
+			if provided.Source == "byok" {
+				runtime.APIKey = provided.APIKey
+			} else if provided.Source == "managed" && c.allowManaged && userctx.UserID(ctx) != "" {
+				runtime.APIKey = provided.APIKey
+				if runtime.APIKey == "" && provided.Provider == "dashscope" {
+					runtime.APIKey = c.apiKey
+				}
+				if runtime.APIKey == "" && provided.Provider == "dashscope" {
+					if credentials, ok := c.provider.(ManagedCredentialProvider); ok {
+						if key, err := credentials.ManagedAPIKey(); err != nil {
+							runtime.APIKey = ""
+						} else if key != "" {
+							runtime.APIKey = key
+						}
+					}
+				}
+			} else {
+				runtime.APIKey = ""
+			}
+			runtime.Endpoint = valueOr(provided.Endpoint, runtime.Endpoint)
+			runtime.Model = valueOr(provided.Model, runtime.Model)
+			runtime.Provider = valueOr(provided.Provider, runtime.Provider)
+			runtime.Source = valueOr(provided.Source, "byok")
+		}
+	}
+	return runtime
+}
+
+// RuntimeIdentity identifies model behavior without exposing credentials.
+func (c *DashScopeClient) RuntimeIdentity(ctx context.Context, capability string) string {
+	runtime := c.runtimeConfig(ctx, capability)
+	return runtime.Provider + "|" + runtime.Endpoint + "|" + runtime.Model
+}
+
+func capabilityForContent(content []ContentItem) string {
+	for _, item := range content {
+		if item.Image != "" || item.Video != "" {
+			return "multimodal"
+		}
+	}
+	return "text"
+}
+
+func (c *DashScopeClient) EmbedDetailed(ctx context.Context, callCtx CallContext, texts []string, textType string) (generation EmbeddingGeneration, callErr error) {
+	runtime := c.runtimeConfig(ctx, "embedding")
+	embeddingModel, embeddingEndpoint := c.embeddingModel, c.embeddingEndpoint
+	if runtime.Source == "managed" {
+		embeddingModel = valueOr(runtime.Model, embeddingModel)
+		embeddingEndpoint = valueOr(runtime.Endpoint, embeddingEndpoint)
+	}
+	traceInput, _ := json.Marshal(texts)
+	ctx, span := telemetry.StartEmbedding(ctx, telemetry.EmbeddingAttributes{
+		Name: callCtx.Step, TraceName: callCtx.TraceName, RunID: callCtx.RunID, SpaceID: callCtx.SpaceID,
+		RefID: callCtx.RefID, SessionID: callCtx.SessionID, Model: embeddingModel, Input: string(traceInput),
+	})
+	defer func() { telemetry.EndEmbedding(span, len(generation.Vectors), generation.TotalTokens, callErr) }()
+	if runtime.APIKey == "" {
+		return EmbeddingGeneration{}, errors.New("当前没有可用的模型额度，请前往设置连接 API Key")
+	}
+	if len(texts) == 0 {
+		return EmbeddingGeneration{}, errors.New("embedding texts are required")
+	}
+	if len(texts) > 10 {
+		return EmbeddingGeneration{}, errors.New("embedding texts cannot exceed 10 per request")
+	}
+	if textType == "" {
+		textType = "document"
+	}
+	finish, err := c.beginUsage(ctx, runtime, "embedding", 1, callCtx)
+	if err != nil {
+		return EmbeddingGeneration{}, err
+	}
+	defer func() { finish(callErr == nil) }()
+	reqBody := embeddingRequestBody{
+		Model: embeddingModel,
+		Input: embeddingRequestInput{Texts: texts},
+		Parameters: embeddingParameters{
+			TextType:   textType,
+			Dimension:  c.embeddingDimensions,
+			OutputType: "dense",
+		},
+	}
+	raw, err := json.Marshal(reqBody)
+	if err != nil {
+		return EmbeddingGeneration{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, embeddingEndpoint, bytes.NewReader(raw))
+	if err != nil {
+		return EmbeddingGeneration{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+runtime.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	started := time.Now()
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		c.recordEmbedding(ctx, callCtx, reqBody, EmbeddingGeneration{Model: embeddingModel, LatencyMS: elapsedMS(started)}, err)
+		return EmbeddingGeneration{}, err
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 20*1024*1024))
+	if err != nil {
+		c.recordEmbedding(ctx, callCtx, reqBody, EmbeddingGeneration{Model: embeddingModel, LatencyMS: elapsedMS(started)}, err)
+		return EmbeddingGeneration{}, err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		err := fmt.Errorf("dashscope embedding request failed with status %d: %s", res.StatusCode, string(body))
+		c.recordEmbedding(ctx, callCtx, reqBody, EmbeddingGeneration{Model: embeddingModel, LatencyMS: elapsedMS(started)}, err)
+		return EmbeddingGeneration{}, err
+	}
+	var parsed embeddingResponseBody
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		c.recordEmbedding(ctx, callCtx, reqBody, EmbeddingGeneration{Model: embeddingModel, LatencyMS: elapsedMS(started)}, err)
+		return EmbeddingGeneration{}, err
+	}
+	if len(parsed.Output.Embeddings) == 0 {
+		err := errors.New("dashscope embedding response has no embeddings")
+		c.recordEmbedding(ctx, callCtx, reqBody, EmbeddingGeneration{Model: embeddingModel, LatencyMS: elapsedMS(started)}, err)
+		return EmbeddingGeneration{}, err
+	}
+	vectors := make([]EmbeddingResult, 0, len(parsed.Output.Embeddings))
+	for _, item := range parsed.Output.Embeddings {
+		vectors = append(vectors, EmbeddingResult{Index: item.TextIndex, Vector: item.Embedding})
+	}
+	result := EmbeddingGeneration{
+		Model:       embeddingModel,
+		Vectors:     vectors,
+		TotalTokens: parsed.Usage.TotalTokens,
+		LatencyMS:   elapsedMS(started),
+	}
+	c.recordEmbedding(ctx, callCtx, reqBody, result, nil)
+	return result, nil
+}
+
+type ContentItem struct {
+	Text  string `json:"text,omitempty"`
+	Image string `json:"image,omitempty"`
+	Video string `json:"video,omitempty"`
+	FPS   int    `json:"fps,omitempty"`
+}
+
+type CallContext struct {
+	Scope        string
+	RefID        string
+	SpaceID      string
+	RunID        string
+	SessionID    string
+	TraceName    string
+	Step         string
+	SystemPrompt string
+}
+
+type Generation struct {
+	Text         string `json:"text"`
+	Model        string `json:"model"`
+	RequestJSON  string `json:"request_json"`
+	ResponseJSON string `json:"response_json"`
+	PromptTokens int    `json:"prompt_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	TotalTokens  int    `json:"total_tokens"`
+	LatencyMS    int64  `json:"latency_ms"`
+}
+
+type EmbeddingResult struct {
+	Index  int
+	Vector []float64
+}
+
+type EmbeddingGeneration struct {
+	Model       string
+	Vectors     []EmbeddingResult
+	TotalTokens int
+	LatencyMS   int64
+}
+
+type CallRecord struct {
+	Scope        string
+	RefID        string
+	SpaceID      string
+	RunID        string
+	Step         string
+	Model        string
+	InputJSON    string
+	OutputText   string
+	ResponseJSON string
+	PromptTokens int
+	OutputTokens int
+	TotalTokens  int
+	LatencyMS    int64
+	ErrorMessage string
+}
+
+type Recorder interface {
+	RecordModelCall(ctx context.Context, record CallRecord) error
+}
+
+type requestBody struct {
+	Model string       `json:"model"`
+	Input requestInput `json:"input"`
+}
+
+type requestInput struct {
+	Messages []message `json:"messages"`
+}
+
+type message struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}
+
+type responseBody struct {
+	Output struct {
+		Choices []struct {
+			Message struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	} `json:"output"`
+	Usage usage `json:"usage"`
+}
+
+type embeddingRequestBody struct {
+	Model      string                `json:"model"`
+	Input      embeddingRequestInput `json:"input"`
+	Parameters embeddingParameters   `json:"parameters"`
+}
+
+type embeddingRequestInput struct {
+	Texts []string `json:"texts"`
+}
+
+type embeddingParameters struct {
+	TextType   string `json:"text_type"`
+	Dimension  int    `json:"dimension"`
+	OutputType string `json:"output_type"`
+}
+
+type embeddingResponseBody struct {
+	Output struct {
+		Embeddings []struct {
+			Embedding []float64 `json:"embedding"`
+			TextIndex int       `json:"text_index"`
+		} `json:"embeddings"`
+	} `json:"output"`
+	Usage struct {
+		TotalTokens int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+type usage struct {
+	InputTokens      int `json:"input_tokens"`
+	OutputTokens     int `json:"output_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
+func (u usage) promptTokens() int {
+	if u.InputTokens > 0 {
+		return u.InputTokens
+	}
+	return u.PromptTokens
+}
+
+func (u usage) outputTokens() int {
+	if u.OutputTokens > 0 {
+		return u.OutputTokens
+	}
+	return u.CompletionTokens
+}
+
+func (u usage) totalTokens() int {
+	if u.TotalTokens > 0 {
+		return u.TotalTokens
+	}
+	return u.promptTokens() + u.outputTokens()
+}
+
+func sanitizedRequestBody(body requestBody) requestBody {
+	copied := body
+	copied.Input.Messages = make([]message, 0, len(body.Input.Messages))
+	for _, msg := range body.Input.Messages {
+		next := msg
+		if content, ok := msg.Content.([]ContentItem); ok {
+			redacted := make([]ContentItem, 0, len(content))
+			for _, item := range content {
+				if item.Image != "" {
+					item.Image = "[image omitted from log]"
+				}
+				if item.Video != "" {
+					item.Video = "[video omitted from log]"
+				}
+				redacted = append(redacted, item)
+			}
+			next.Content = redacted
+		}
+		copied.Input.Messages = append(copied.Input.Messages, next)
+	}
+	return copied
+}
+
+func sanitizedResponseJSON(raw []byte) []byte {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return raw
+	}
+	redactReasoning(value)
+	out, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+func redactReasoning(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if key == "reasoning_content" {
+				typed[key] = "[redacted]"
+				continue
+			}
+			redactReasoning(child)
+		}
+	case []any:
+		for _, child := range typed {
+			redactReasoning(child)
+		}
+	}
+}
+
+func (c *DashScopeClient) record(ctx context.Context, callCtx CallContext, modelName string, req, res []byte, result Generation, err error) {
+	if c.recorder == nil {
+		return
+	}
+	record := CallRecord{
+		Scope:        callCtx.Scope,
+		RefID:        callCtx.RefID,
+		SpaceID:      callCtx.SpaceID,
+		RunID:        callCtx.RunID,
+		Step:         callCtx.Step,
+		Model:        modelName,
+		InputJSON:    string(req),
+		OutputText:   result.Text,
+		ResponseJSON: string(res),
+		PromptTokens: result.PromptTokens,
+		OutputTokens: result.OutputTokens,
+		TotalTokens:  result.TotalTokens,
+		LatencyMS:    result.LatencyMS,
+	}
+	if err != nil {
+		record.ErrorMessage = err.Error()
+	}
+	_ = c.recorder.RecordModelCall(ctx, record)
+}
+
+func (c *DashScopeClient) recordEmbedding(ctx context.Context, callCtx CallContext, req embeddingRequestBody, result EmbeddingGeneration, err error) {
+	if c.recorder == nil {
+		return
+	}
+	reqJSON, _ := json.Marshal(req)
+	response := map[string]any{
+		"embedding_count": len(result.Vectors),
+		"dimensions":      c.embeddingDimensions,
+		"total_tokens":    result.TotalTokens,
+	}
+	responseJSON, _ := json.Marshal(response)
+	record := CallRecord{
+		Scope:        callCtx.Scope,
+		RefID:        callCtx.RefID,
+		SpaceID:      callCtx.SpaceID,
+		RunID:        callCtx.RunID,
+		Step:         callCtx.Step,
+		Model:        result.Model,
+		InputJSON:    string(reqJSON),
+		OutputText:   fmt.Sprintf("%d embedding vector(s)", len(result.Vectors)),
+		ResponseJSON: string(responseJSON),
+		PromptTokens: result.TotalTokens,
+		TotalTokens:  result.TotalTokens,
+		LatencyMS:    result.LatencyMS,
+	}
+	if err != nil {
+		record.ErrorMessage = err.Error()
+	}
+	_ = c.recorder.RecordModelCall(ctx, record)
+}
+
+func elapsedMS(started time.Time) int64 {
+	return time.Since(started).Milliseconds()
+}
+
+func valueOr(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}

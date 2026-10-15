@@ -1,0 +1,53 @@
+name: Publish website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/website/**'
+      - '.github/workflows/pages.yml'
+      - 'internal/chat/service.go'
+      - 'web/app/src/**'
+      - 'internal/chat/skills/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/website/package-lock.json
+      - name: Check public content
+        run: python3 scripts/check-public-content.py
+      - name: Install dependencies
+        working-directory: web/website
+        run: npm ci
+      - name: Verify website capabilities
+        working-directory: web/website
+        run: npm run test:capabilities
+      - name: Build website
+        working-directory: web/website
+        env:
+          SITE_BASE_PATH: /briefonce-open/
+        run: npm run build
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web/website/dist/client
+      - id: deployment
+        uses: actions/deploy-pages@v5

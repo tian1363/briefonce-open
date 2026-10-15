@@ -1,0 +1,19 @@
+.pose-library-picker { color: var(--cbi-text-primary); min-width: 0; }
+.pose-library-picker label { display: grid; gap: 5px; font-size: 12px; }
+.pose-library-picker input, .pose-library-picker select { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid var(--cbi-divider); border-radius: 6px; background: var(--cbi-bg-default); color: inherit; }
+.pose-library-filters { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 10px 0; }
+.pose-library-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0; font-size: 12px; }
+.pose-library-picker button { cursor: pointer; color: inherit; }
+.pose-library-picker button:disabled { cursor: default; opacity: .5; }
+.pose-library-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.pose-library-grid article { min-width: 0; background: var(--cbi-bg-default); border-radius: 8px; padding: 6px; }
+.pose-library-grid article.selected { outline: 2px solid var(--cbi-primary); background: var(--cbi-primary-tint); }
+.pose-library-choice { display: grid; gap: 6px; width: 100%; border: 0; text-align: left; background: transparent; font: inherit; }
+.pose-library-choice img, .pose-library-placeholder { width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: var(--cbi-bg-shell); border-radius: 6px; }
+.pose-library-placeholder { display: grid; place-content: center; text-align: center; font-size: 12px; color: var(--cbi-text-secondary); }
+.pose-library-choice small, .pose-library-choice span { font-size: 11px; color: var(--cbi-text-secondary); overflow-wrap: anywhere; }
+.pose-library-grid details { font-size: 12px; padding: 6px; overflow-wrap: anywhere; }
+.pose-library-picker.compact .pose-library-grid { grid-template-columns: repeat(2,minmax(0,1fr)); max-height: 400px; overflow: auto; padding: 3px; }
+.pose-library-picker.compact .pose-library-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.pose-library-picker :focus-visible { outline: 2px solid var(--cbi-primary); outline-offset: 2px; }
+@media(max-width: 600px) { .pose-library-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .pose-library-filters { grid-template-columns: repeat(2,minmax(0,1fr)); } }

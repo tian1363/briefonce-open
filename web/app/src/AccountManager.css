@@ -1,0 +1,52 @@
+.supplier-model-catalog{padding:20px;border:1px solid var(--cbi-divider);border-radius:16px;background:var(--cbi-bg-default)}
+.supplier-model-catalog h3{margin:0;font-size:18px}.supplier-model-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px;margin-top:16px}.supplier-model-grid article{display:grid;gap:8px;padding:16px;border-radius:12px;background:var(--cbi-bg-shell);min-width:0}.supplier-model-grid strong{font-size:14px}.supplier-model-grid code{font-size:12px;overflow-wrap:anywhere}.supplier-model-grid small,.supplier-model-grid span{font-size:12px;color:var(--cbi-text-secondary)}
+.account-manager,.managed-credits-workspace{display:grid;gap:20px;max-width:1120px;margin:24px auto;padding:0 24px 32px;color:var(--cbi-text-primary)}
+.account-manager-head,.managed-credits-workspace>header{display:flex;align-items:start;justify-content:space-between;gap:16px}
+.account-manager h2,.managed-credits-workspace h2{margin:0;font-size:20px}
+.account-manager p,.managed-credits-workspace p{margin:6px 0 0;color:var(--cbi-text-secondary);font-size:13px;line-height:1.6}
+.account-create{display:grid;grid-template-columns:repeat(5,minmax(0,1fr)) auto;align-items:end;gap:12px;padding:20px;border-radius:16px;background:var(--cbi-bg-shell)}
+.platform-key-settings{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,320px) auto;align-items:end;gap:12px;padding:18px 20px;border:1px solid var(--cbi-divider);border-radius:16px;background:var(--cbi-bg-default)}
+.platform-key-settings>div{align-self:center}.platform-key-settings strong{font-size:15px}.platform-key-settings label{display:grid;gap:7px;font-size:12px;color:var(--cbi-text-secondary)}.platform-key-settings input{width:100%;height:40px;padding:0 10px;border:1px solid var(--cbi-divider);border-radius:9px;background:var(--cbi-bg-default)}.platform-key-settings small{grid-column:1/-1;color:var(--cbi-text-hint);font-size:12px}
+.platform-models{display:grid;gap:14px;padding:18px 20px;border:1px solid var(--cbi-divider);border-radius:16px;background:var(--cbi-bg-default)}
+.platform-models h3{margin:0;font-size:16px}.platform-model-list{display:grid;gap:4px}.platform-model-row{border-top:1px solid var(--cbi-divider)}
+.platform-model-row summary{display:grid;grid-template-columns:170px minmax(0,1fr) auto;align-items:center;gap:12px;padding:12px 2px;cursor:pointer;font-size:13px;list-style:none}.platform-model-row summary::-webkit-details-marker{display:none}.platform-model-row summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cbi-text-secondary)}.platform-model-row summary small{color:var(--cbi-primary-dark)}
+.platform-model-row form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:8px 2px 18px}.platform-model-row label{display:grid;gap:6px;font-size:12px;color:var(--cbi-text-secondary)}.platform-model-row input,.platform-model-row select{height:40px;padding:0 10px;border:1px solid var(--cbi-divider);border-radius:9px;background:var(--cbi-bg-default);color:var(--cbi-text-primary)}.platform-model-row .platform-model-endpoint,.platform-model-row form>small{grid-column:1/-1}.platform-model-row form>small{color:var(--cbi-text-hint)}.platform-model-row button{justify-self:start}
+.platform-model-row .platform-shared-toggle{display:flex;align-items:center;gap:8px}.platform-model-row .platform-shared-toggle input{width:16px;height:16px;padding:0}
+.account-create label{display:grid;gap:7px;font-size:12px;color:var(--cbi-text-secondary)}
+.account-create input{width:100%;height:40px;padding:0 10px;border:1px solid var(--cbi-divider);border-radius:9px;background:var(--cbi-bg-default);color:var(--cbi-text-primary)}
+.account-price-note{padding:12px 16px;border-radius:10px;background:var(--cbi-primary-tint);color:var(--cbi-text-secondary);font-size:12px;line-height:1.6}
+.account-price-editor{padding:0 4px;font-size:13px}.account-price-editor summary{cursor:pointer;color:var(--cbi-primary-dark)}.account-price-editor>div{display:grid;gap:4px;margin-top:12px}.account-price-editor>div>div{display:grid;grid-template-columns:minmax(0,1fr) 100px 56px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--cbi-divider)}.account-price-editor button{border:0;background:transparent;color:var(--cbi-primary-dark);cursor:pointer}.account-price-editor strong{font-weight:600}
+.account-credential{display:flex;align-items:center;gap:12px;padding:16px;border-radius:12px;background:var(--cbi-bg-shell)}
+.account-credential>div{display:grid;gap:7px;flex:1;min-width:0}
+.account-credential code{overflow-wrap:anywhere;font-size:13px}
+.account-list{display:grid;gap:4px}
+.account-row{padding:16px 4px;border-bottom:1px solid var(--cbi-divider)}
+.account-row-main{display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1fr) auto;gap:20px;align-items:center}
+.account-row-main>div{display:grid;gap:5px;min-width:0}
+.account-row-main small{overflow:hidden;text-overflow:ellipsis;color:var(--cbi-text-hint);font-size:12px}
+.account-credit-progress{max-width:420px;margin-top:10px;display:grid;gap:5px}
+.account-credit-progress>div{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--cbi-text-secondary)}
+.account-credit-progress strong{font-weight:600;color:var(--cbi-text-primary)}
+.account-credit-progress progress{width:100%;height:6px;appearance:none;border:0;border-radius:99px;overflow:hidden;background:var(--cbi-divider)}
+.account-credit-progress progress::-webkit-progress-bar{background:var(--cbi-divider);border-radius:99px}
+.account-credit-progress progress::-webkit-progress-value{background:var(--cbi-primary);border-radius:99px}
+.account-credit-progress progress::-moz-progress-bar{background:var(--cbi-primary);border-radius:99px}
+.account-active,.account-suspended{font-size:12px;color:var(--cbi-text-secondary)}
+.account-suspended{color:var(--cbi-primary-dark)}
+.account-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}
+.account-actions button{padding:4px 0;border:0;background:transparent;color:var(--cbi-primary-dark);font-size:12px;cursor:pointer}
+.account-actions button:disabled{opacity:.5;cursor:not-allowed}
+.account-ledger{display:grid;gap:0;margin-top:12px}
+.account-ledger>div{display:grid;grid-template-columns:minmax(0,1fr) 80px 180px;gap:12px;padding:10px 0;border-bottom:1px solid var(--cbi-divider);font-size:13px}
+.account-ledger strong{text-align:right}
+.account-ledger small{text-align:right;color:var(--cbi-text-hint)}
+.managed-credits-workspace>header span{font-size:12px;color:var(--cbi-primary-dark)}
+.managed-credits-workspace h1{margin:4px 0 0;font-size:32px}
+.managed-credits-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:24px;border-radius:16px;background:var(--cbi-bg-shell)}
+.managed-credits-summary>div{display:grid;gap:8px}
+.managed-credits-summary small{color:var(--cbi-text-secondary)}
+.managed-credits-summary strong{font-size:22px}
+.managed-credit-purchase{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 20px;border:1px solid var(--cbi-divider);border-radius:14px}.managed-credit-purchase strong{font-size:14px}.managed-credit-purchase>p{flex-basis:100%;margin:0}
+@media(max-width:960px){.account-create{grid-template-columns:repeat(2,minmax(0,1fr))}.account-create button{grid-column:1/-1}.platform-key-settings{grid-template-columns:1fr}.account-row-main{grid-template-columns:1fr 1fr auto}}
+@media(max-width:600px){.account-manager,.managed-credits-workspace{padding:0 18px 28px}.account-create{grid-template-columns:1fr}.account-row-main{grid-template-columns:1fr;gap:8px}.account-ledger>div{grid-template-columns:1fr auto}.account-ledger small{grid-column:1/-1;text-align:left}.managed-credits-summary{grid-template-columns:1fr}.account-credential{align-items:stretch;flex-direction:column}.platform-model-row summary{grid-template-columns:1fr auto}.platform-model-row summary span{grid-column:1/-1;grid-row:2}.platform-model-row form{grid-template-columns:1fr}}
+.purchase-packages{padding:24px 0}.purchase-packages h2{font-size:18px}.purchase-packages>p{font-size:13px;color:var(--cbi-text-secondary);line-height:1.6}.purchase-package-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin:20px 0}.purchase-package-grid article{background:var(--cbi-bg-shell);padding:20px;border-radius:12px}.purchase-package-grid h3{font-size:24px;margin:16px 0}.purchase-order{display:flex;gap:16px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--cbi-divider);padding:12px 0;font-size:12px;overflow-wrap:anywhere}.purchase-order small{display:block;color:var(--cbi-text-secondary)}

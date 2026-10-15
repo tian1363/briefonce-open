@@ -1,0 +1,29 @@
+name: 问题反馈 / Bug report
+description: 描述复现步骤，帮助改进工具与工作流
+title: "[Bug] "
+body:
+  - type: dropdown
+    id: feature
+    attributes:
+      label: 使用的功能
+      options:
+        - 模特姿势
+        - 挂拍图精修
+        - 商品详情长图
+        - 视频素材提取
+        - 创意解读
+        - 创意对话与视频
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 操作步骤、预期与实际结果
+      description: 可附脱敏截图；请勿提交密码、模型密钥或客户资料。
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 浏览器与部署方式
