@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/tian1363/scriptagent/internal/imagepolicy"
 )
 
 type Platform struct {
@@ -275,6 +277,7 @@ func Compile(p Plan) ([]Task, error) {
 
 仅绘制以下文案，各出现一次，不绘制引号或其他文字：
 %s`, platform.Width, platform.Height, role, p.StyleLock, pg.Visual, strings.Join(copyLines, "\n"))
+			prompt += "\n" + imagepolicy.NaturalSkin
 			tasks = append(tasks, Task{PageID: pg.ID, PlatformID: platform.ID, PlatformName: platform.Name, Headline: pg.Headline, SourceAssetID: pg.SourceAssetID, ReferenceID: p.Input.ReferenceID, Width: platform.Width, Height: platform.Height, Prompt: prompt, StyleVersion: version})
 		}
 	}
@@ -335,6 +338,7 @@ func compileWhole(p Plan, platform Platform, pages map[string]Page, version stri
 %s
 
 保留商品参考的真实颜色、轮廓、结构、部件、缝线与标识。不臆造不可见的背面、内里和材质。标题与正文各出现一次，不绘制引号或其他文字。`, width, height, strings.Join(roles, "\n"), p.StyleLock, strings.Join(blocks, "\n\n"))
+	prompt += "\n" + imagepolicy.NaturalSkin
 	return Task{SectionIDs: platform.Sections, SourceAssetIDs: ids, PageID: "whole", PlatformID: platform.ID, PlatformName: platform.Name, Headline: p.Input.Facts.Title + " · 完整详情图", SourceAssetID: ids[0], ReferenceID: p.Input.ReferenceID, Width: width, Height: height, Prompt: prompt, StyleVersion: version}
 }
 

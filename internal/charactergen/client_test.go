@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tian1363/scriptagent/internal/imagepolicy"
 	"github.com/tian1363/scriptagent/internal/model"
 	"image"
 	"image/png"
@@ -73,6 +74,9 @@ func TestReferenceControlsReachProvider(t *testing.T) {
 				t.Fatalf("wrong controls: %+v", req.Parameters)
 			}
 			content := req.Input.Messages[0].Content
+			if !strings.Contains(content[1]["text"], imagepolicy.NaturalSkin) {
+				t.Fatal("natural skin requirements did not reach the image provider")
+			}
 			if !strings.HasPrefix(content[0]["image"], "data:") || strings.Contains(content[1]["text"], "ignored hairstyle") {
 				t.Fatal("reference not preserved")
 			}

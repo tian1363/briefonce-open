@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tian1363/scriptagent/internal/imagepolicy"
 	"github.com/tian1363/scriptagent/internal/model"
 )
 
@@ -54,7 +55,7 @@ func (c Controls) Prompt(reference bool) string {
 	if reference {
 		identity = "以输入图片中同一位成年角色为身份基准，保持五官比例、脸型、肤色、年龄和发型一致。仅根据下列造型要求编辑，不替换成另一个人。"
 	}
-	return fmt.Sprintf("%s 服装：%s。表情：%s。姿态：%s。构图：%s。背景：%s。光线：%s。单人真实摄影，面部清晰，皮肤纹理自然，无文字与水印。", identity, c.Outfit, c.Expression, c.Pose, c.Framing, c.Background, c.Lighting)
+	return fmt.Sprintf("%s 服装：%s。表情：%s。姿态：%s。构图：%s。背景：%s。光线：%s。单人真实摄影，面部清晰，皮肤纹理自然，无文字与水印。", identity, c.Outfit, c.Expression, c.Pose, c.Framing, c.Background, c.Lighting) + imagepolicy.NaturalSkin
 }
 
 type Client struct {

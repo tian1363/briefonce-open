@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tian1363/scriptagent/internal/charactergen"
+	"github.com/tian1363/scriptagent/internal/imagepolicy"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/model"
 	"github.com/tian1363/scriptagent/internal/storage"
@@ -636,7 +637,7 @@ func (s *Service) sourcePath(userID string, in Input) (path, sourceType, sourceI
 
 func extractionPrompt(kind string) (string, string) {
 	if kind == "person" {
-		return "严格以输入视频画面中最清晰的单个人物为参考，提取同一人物角色，保留可见的五官、脸型、肤色、发型、服装版型、颜色和配饰。生成真实摄影风格的人物角色白底图，纯白背景、均匀柔光、人物完整居中。若原画面只显示半身，只做半身图，不臆造不可见的身体或服装细节。只保留跨帧证实属于衣服本体的标识；视频后期叠加的文字、水印和平台图标全部移除。", "多人、不同人物、换脸、换装、改色、额外配饰、场景背景、视频字幕、平台水印、肢体畸形"
+		return "严格以输入视频画面中最清晰的单个人物为参考，提取同一人物角色，保留可见的五官、脸型、肤色、发型、服装版型、颜色和配饰。生成真实摄影风格的人物角色白底图，纯白背景、均匀柔光、人物完整居中。若原画面只显示半身，只做半身图，不臆造不可见的身体或服装细节。只保留跨帧证实属于衣服本体的标识；视频后期叠加的文字、水印和平台图标全部移除。" + imagepolicy.NaturalSkin, imagepolicy.UnnaturalSkin + "、多人、不同人物、换脸、换装、改色、额外配饰、场景背景、视频字幕、平台水印、肢体畸形"
 	}
 	return "严格提取视频中同一件实物商品，保留可见的颜色、轮廓、长度比例、裁片拼接、领口、袖口、拉链、口袋和已证实属于商品的图案。若商品是模特身上的衣服，保留整件衣服原有版型，只移除人体和背景；不能把衣服换款、改成短款或另造内搭。若商品不是衣服，不把模特服装或道具误当商品。纯白背景、真实棚拍光线。不可见的背面和细节不得补造。视频字幕、水印、平台图标和悬浮字绝不是商品 Logo。", "另一种商品、衣长改变、版型改变、拼接错误、伪造文字、视频水印、平台角标、字幕、额外商品、人物、手、场景背景"
 }

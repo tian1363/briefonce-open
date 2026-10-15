@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tian1363/scriptagent/internal/charactergen"
+	"github.com/tian1363/scriptagent/internal/imagepolicy"
 	"github.com/tian1363/scriptagent/internal/jobs"
 	"github.com/tian1363/scriptagent/internal/userctx"
 )
@@ -472,7 +473,7 @@ func buildPosePrompt(pose posePreset, category string) string {
 		"不得使用模特图中的其他商品或服装替代图二商品，也不得修改图二商品已可见的颜色、轮廓、结构、图案、文字或标识。" +
 		product + "姿势动作：" + pose.Instruction +
 		"在不改变商品可见细节的前提下调整人物肢体和商品位置。对于商品图未展示的侧面、背面或隐藏细节，不要编造标识、文字或特殊结构；若动作冲突，优先保留商品真实外观。" +
-		"生成真实摄影风格的电商模特图，柔和棚拍光线，简洁浅色背景，竖版构图。不得改变模特身份，不得虚构商品功能或额外配件。"
+		"生成真实摄影风格的电商模特图，柔和棚拍光线，简洁浅色背景，竖版构图。不得改变模特身份，不得虚构商品功能或额外配件。" + imagepolicy.NaturalSkin
 }
 
 var poseSceneDirections = map[string]string{
