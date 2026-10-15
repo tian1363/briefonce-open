@@ -10,6 +10,7 @@ const base = '/' + (process.env.SITE_BASE_PATH || '/').split('/').filter(Boolean
 const local = value => `${base === '/' ? '/' : `${base}/`}${value}`;
 const examples = [
   { slug: 'apparel-images', title: 'AI 服装模特图与多姿势商品图', description: '用同款外套的商品资料与姿势参考，准备一组模特展示图。多张商品图共享参考，每个姿势生成一张。' },
+  { slug: 'reference-recreation', title: '参考图复刻：替换商品与模特的实际案例', description: '开发预览：以三栏服装展示为参考，替换商品与模特并保留构图。包含实际输入、原始生成结果和工作流截图，尚未包含在当前公开版。' },
   { slug: 'product-detail', title: '服装与鞋履 AI 商品详情页', description: '从商品卖点、材质与品类出发，选择实际详情页参考图，策划并生成商品详情长图。' },
   { slug: 'video-extraction', title: '视频素材提取与创意解读', description: '预览参考视频中解析成功的素材，导入产品资料，再继续写开头、脚本与分镜。' },
 ];
@@ -20,7 +21,7 @@ function layout(title, description, url, body) {
 const output = path.join(site, 'public/examples');
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
-writeFileSync(path.join(output, 'index.html'), layout('商品图与创作工作流示例', '从服装模特图、商品详情页到视频素材提取，跟着三个例子使用 BriefOnce。', `${origin}examples/`, `<main class="library"><p class="eyebrow">BRIEFONCE / EXAMPLES</p><h1>从一个例子开始。</h1><p class="lead">准备素材，选择工作流，检查结果。</p><div class="skill-grid">${examples.map((item, index) => `<a class="skill-card" href="${local(`examples/${item.slug}/`)}"><span class="card-index">0${index + 1} / WORKFLOW</span><h2>${escape(item.title)}</h2><p>${escape(item.description)}</p><span class="card-link">查看步骤 <b>↗</b></span></a>`).join('')}</div></main>`));
+writeFileSync(path.join(output, 'index.html'), layout('商品图与创作工作流示例', '从服装模特图、商品详情页到视频素材提取，查看实际案例，跟着步骤使用 BriefOnce。', `${origin}examples/`, `<main class="library"><p class="eyebrow">BRIEFONCE / EXAMPLES</p><h1>从一个例子开始。</h1><p class="lead">看看真实输入和生成结果，再开始自己的创作。</p><div class="skill-grid">${examples.map((item, index) => `<a class="skill-card" href="${local(`examples/${item.slug}/`)}">${['apparel-images','reference-recreation'].includes(item.slug) ? `<img src="${local(`assets/cases/${item.slug==='apparel-images'?'pose-1.png':'reference-result.png'}`)}" alt="${escape(item.title)}实际生成结果" loading="lazy" style="width:100%;height:180px;object-fit:contain;background:#f3eee8;border-radius:8px;margin-bottom:18px">` : ''}<span class="card-index">0${index + 1} / ${item.slug==='reference-recreation'?'DEVELOPMENT PREVIEW':'WORKFLOW'}</span><h2>${escape(item.title)}</h2><p>${escape(item.description)}</p><span class="card-link">查看步骤 <b>↗</b></span></a>`).join('')}</div></main>`));
 for (const item of examples) {
   const markdown = readFileSync(path.join(root, `docs/examples/${item.slug}.md`), 'utf8');
   const blocks = markdown.split('\n\n').filter(Boolean).slice(1).filter(block => !block.startsWith('[查看'));
@@ -29,7 +30,7 @@ for (const item of examples) {
       const match = block.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (!match) throw new Error('Invalid example image');
       const asset = match[2].replace('../../web/website/public/', '');
-      return `<figure><img src="${local(asset)}" alt="${escape(match[1])}" style="width:100%;max-height:620px;object-fit:contain"></figure>`;
+      return `<figure><a href="${local(asset)}" target="_blank" rel="noopener noreferrer"><img src="${local(asset)}" alt="${escape(match[1])}" loading="lazy" decoding="async" style="width:100%;max-height:620px;object-fit:contain"></a></figure>`;
     }
     if (/^\d+\. /.test(block)) return `<ol>${block.split('\n').map(line => `<li style="margin:16px 0">${escape(line.replace(/^\d+\. /,''))}</li>`).join('')}</ol>`;
     return `<p>${escape(block.replace(/^\*|\*$/g,''))}</p>`;

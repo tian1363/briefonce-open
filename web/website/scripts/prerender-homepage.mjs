@@ -6,7 +6,13 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const server = await createServer({ root, server: { middlewareMode: true }, appType: 'custom' });
+// SSR rendering does not need the client dependency scanner or browser warmup.
+const server = await createServer({
+  root,
+  optimizeDeps: { noDiscovery: true, include: [] },
+  server: { middlewareMode: true, warmup: { clientFiles: [] } },
+  appType: 'custom',
+});
 try {
   const { App } = await server.ssrLoadModule('/src/App.jsx');
   const markup = renderToString(createElement(App));

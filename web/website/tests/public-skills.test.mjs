@@ -40,7 +40,7 @@ test('workflow examples have static content, working local links and sitemap ent
     env: { ...process.env, SITE_BASE_PATH: '/briefonce-open/' },
   });
   const sitemap = readFileSync(path.join(website, 'public/sitemap.xml'), 'utf8');
-  for (const slug of ['apparel-images', 'product-detail', 'video-extraction']) {
+  for (const slug of ['apparel-images', 'reference-recreation', 'product-detail', 'video-extraction']) {
     const html = readFileSync(path.join(website, `public/examples/${slug}/index.html`), 'utf8');
     assert.match(html, /<ol><li/);
     assert.match(html, /<h1>/);

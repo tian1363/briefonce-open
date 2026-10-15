@@ -4,9 +4,40 @@
 
 Keep product photos, facts and creative references together. Create model pose images, refine product photos, and generate product detail images in visual workflows. Develop scripts and video tasks in chat. Built for apparel and footwear brands, ecommerce teams and creators; runs locally or on your own server.
 
-![BriefOnce visual workflow illustration](web/website/public/assets/toolbox-workspace.svg)
+## Real results
 
-*Interface illustration. Visual examples show creative directions, not measured output-quality results.*
+### One jacket, four poses
+
+<table>
+  <tr><th>Product reference</th><th>Front</th><th>Side</th><th>Raised arm</th><th>Relaxed stance</th></tr>
+  <tr>
+    <td width="20%"><img src="web/website/public/assets/cases/jacket-input.png" alt="Actual black hooded jacket product reference" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/pose-1.png" alt="Actual generated model image, front pose" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/pose-2.png" alt="Actual generated model image, side pose" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/pose-3.png" alt="Actual generated model image, raised arm pose" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/pose-4.png" alt="Actual generated model image, relaxed stance" /></td>
+  </tr>
+</table>
+
+*Actual outputs, without retouching. Product appearance, model identity and body position use separate references.*
+
+### Reference recreation · Development preview
+
+Keep a reference layout while replacing the product and model. This actual test demonstrates a scene that is not yet included in the public release.
+
+<table>
+  <tr><th>Reference</th><th>Generated result</th></tr>
+  <tr>
+    <td width="50%"><img src="web/website/public/assets/cases/reference-original.jpg" alt="Original three-column apparel reference" /></td>
+    <td width="50%"><img src="web/website/public/assets/cases/reference-result.png" alt="Actual result with the replacement jacket and model" /></td>
+  </tr>
+</table>
+
+*Third-party brand marks come from the reference material; this is not a brand partnership. [See the case](docs/examples/reference-recreation.md).*
+
+![BriefOnce actual model pose workflow, with product and model references connected to four generated results](web/website/public/assets/cases/pose-workflow.png)
+
+*Actual interface capture with filenames and billing information hidden. The toolbar includes development scenes; currently released features are listed below.*
 
 ## What you can do
 

@@ -14,18 +14,38 @@
 
 把商品图片、卖点和参考素材放在一起，用工作流制作商品展示图，用创意对话推进脚本与视频。适合服装、鞋履品牌、电商团队和内容创作者，也支持本地运行与自托管。
 
-## 先看看能做什么
+## 看看实际生成的样子
+
+### 一件外套，四个姿势
 
 <table>
-  <tr><th>商品素材</th><th>场景与姿势</th><th>白底展示</th></tr>
+  <tr><th>商品参考</th><th>正面站姿</th><th>侧身站姿</th><th>抬手展示</th><th>自然站姿</th></tr>
   <tr>
-    <td width="33%"><img src="web/website/public/assets/hero-activewear-input.jpg" alt="女款户外夹克商品素材示意" /></td>
-    <td width="34%"><img src="web/website/public/assets/hero-activewear-scenes.jpg" alt="同款夹克的模特多场景与多姿势视觉示意" /></td>
-    <td width="33%"><img src="web/website/public/assets/hero-activewear-white.jpg" alt="同款户外夹克白底商品图视觉示意" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/jacket-input.png" alt="实际输入的黑色连帽短外套商品图" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/pose-1.png" alt="实际生成的黑色外套模特图：正面站立，一臂横于腰前" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/pose-2.png" alt="实际生成的黑色外套模特图：侧身站姿" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/pose-3.png" alt="实际生成的黑色外套模特图：抬手展示" /></td>
+    <td width="20%"><img src="web/website/public/assets/cases/pose-4.png" alt="实际生成的黑色外套模特图：自然站姿" /></td>
   </tr>
 </table>
 
-*图片为创作方向示意。实际生成结果由商品资料、参考素材与所用模型共同决定。*
+*真实生成结果，未经修图。商品、人物身份与动作分别使用对应的参考素材。*
+
+### 参考图复刻 · 开发预览
+
+保留参考画面的构图，换上自己的商品与模特。以下为实际测试结果；这个场景尚未包含在当前公开版本中。
+
+<table>
+  <tr><th>参考画面</th><th>替换商品与模特后的结果</th></tr>
+  <tr>
+    <td width="50%"><img src="web/website/public/assets/cases/reference-original.jpg" alt="参考原图：三栏服装上身与细节展示" /></td>
+    <td width="50%"><img src="web/website/public/assets/cases/reference-result.png" alt="实际生成结果：沿用三栏构图，替换为黑色短外套与指定模特" /></td>
+  </tr>
+</table>
+
+*画面中的第三方品牌标识来自参考素材，不代表品牌合作。[查看完整案例](docs/examples/reference-recreation.md)。*
+
+## 当前公开版本
 
 | 你想完成的事 | 从这里开始 |
 | --- | --- |
@@ -37,9 +57,9 @@
 
 ### 在工作流里连接素材与结果
 
-![BriefOnce 工作流界面示意：商品素材、模特与姿势参考、AI 生成节点及作品库](web/website/public/assets/toolbox-workspace.svg)
+![BriefOnce 实际模特姿势工作流：商品与模特参考连接四张已生成的姿势图](web/website/public/assets/cases/pose-workflow.png)
 
-*界面示意。工具与工作流有各自入口；对话输入框目前主要承接脚本和视频创作。*
+*实际工作流截图，已隐去文件名与计费信息。截图含开发中的场景入口；公开版支持上表所列功能。*
 
 ## 跟着一个例子开始
 

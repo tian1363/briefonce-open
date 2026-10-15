@@ -1,0 +1,42 @@
+.real-cases { padding-top:100px; padding-bottom:64px; }
+.real-cases .intro { margin-bottom:48px; }
+.real-case + .real-case { margin-top:72px; padding-top:48px; border-top:1px solid #e8e0d6; }
+.real-case-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:28px; }
+.case-number { display:flex; align-items:center; flex-wrap:wrap; gap:12px; color:#a64a36; font-size:10px; font-weight:700; letter-spacing:.12em; }
+.case-number b { padding:5px 8px; border-radius:6px; background:#efe7db; color:#6b625a; font-size:10px; font-weight:500; letter-spacing:0; }
+.real-case h3 { margin:12px 0 0; font-size:clamp(23px,2.5vw,35px); font-weight:600; line-height:1.4; letter-spacing:-.04em; }
+.real-case-heading .text-link { flex-shrink:0; margin-bottom:5px; }
+.case-image { margin:0; min-width:0; }
+.case-image a { display:block; position:relative; overflow:hidden; border-radius:12px; background:#f3eee8; }
+.case-image img { width:100%; height:100%; object-fit:contain; }
+.case-image-expand { display:grid; place-items:center; position:absolute; right:10px; bottom:10px; width:32px; height:32px; border-radius:8px; background:#fffdf9e8; color:#171513; opacity:0; transition:opacity .18s; }
+.case-image a:hover .case-image-expand,.case-image a:focus-visible .case-image-expand { opacity:1; }
+.case-pose-layout { display:grid; grid-template-columns:minmax(0,1fr) 36px minmax(0,4fr); gap:16px; align-items:center; }
+.case-input,.case-poses>div,.case-comparison>div { min-width:0; }
+.case-pose-layout .case-image a { aspect-ratio:3/4; }
+.case-input>span,.case-poses>div>span,.case-comparison>div>span { display:block; padding-top:12px; color:#6b625a; font-size:11px; line-height:1.5; text-align:center; }
+.case-input .case-image a { background:#fffdf9; }
+.case-flow-arrow { width:24px; height:24px; margin-top:-30px; color:#f0523d; }
+.case-poses { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.case-caption { margin:20px 0 0; color:#8b8074; font-size:11px; line-height:1.8; }
+.case-comparison { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.case-comparison .case-image a { aspect-ratio:16/9; }
+.case-workflow { margin-top:20px; }
+.case-workflow summary { cursor:pointer; color:#6b625a; font-size:12px; width:fit-content; padding:8px 0; }
+.case-workflow .case-image { margin-top:12px; }
+.case-workflow img { height:auto; }
+.product-shot { transform:none; }
+.product-shot figcaption { transform:none; line-height:1.6; }
+@media(max-width:760px) {
+  .real-cases { padding-top:64px; padding-bottom:32px; }
+  .real-case-heading { align-items:flex-start; flex-direction:column; gap:16px; margin-bottom:24px; }
+  .real-case + .real-case { margin-top:48px; padding-top:36px; }
+  .case-pose-layout { grid-template-columns:72px minmax(0,1fr); gap:18px; align-items:start; }
+  .case-input { position:sticky; top:96px; }
+  .case-poses { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 10px; }
+  .case-flow-arrow { display:none; }
+  .case-comparison { grid-template-columns:1fr; gap:24px; }
+  .case-image-expand { opacity:1; width:28px; height:28px; right:6px; bottom:6px; }
+  .case-number { letter-spacing:.07em; }
+}
+@media(prefers-reduced-motion:reduce) { .case-image-expand { transition:none; } }
